@@ -1,0 +1,177 @@
+/* Cyberpunk theme: deep space background, neon-green/cyan/magenta accents.
+   Panel borders & colour come from the Rich renderables in render.py;
+   this file lays out the grid and styles the interactive controls. */
+
+Screen {
+    background: #0a0e14;
+    color: #c9d1d9;
+}
+
+Header {
+    background: #0d1b2a;
+    color: #00ff9c;
+    text-style: bold;
+}
+
+Footer {
+    background: #0d1b2a;
+    color: #36f9f6;
+}
+
+/* ---- tabs ---- */
+Tabs {
+    background: #0a0e14;
+}
+
+Tab {
+    color: #4b5263;
+}
+
+Tab.-active {
+    color: #00ff9c;
+    text-style: bold;
+}
+
+TabbedContent {
+    background: #0a0e14;
+}
+
+/* ---- panel grid ---- */
+.row {
+    height: auto;
+    margin: 0 1;
+}
+
+.cell {
+    width: 1fr;
+    height: auto;
+    margin: 0 1 1 0;
+    background: #0c1320;
+}
+
+.cell.wide {
+    width: 1fr;
+}
+
+/* ---- control sections ---- */
+.section {
+    color: #36f9f6;
+    text-style: bold;
+    margin: 1 0 0 2;
+}
+
+.btnrow {
+    height: auto;
+    margin: 0 1 1 1;
+    align-horizontal: left;
+}
+
+Button.ctl {
+    margin: 0 1 0 0;
+    min-width: 14;
+    background: #16202e;
+    color: #c9d1d9;
+    border: tall #1f2d3d;
+}
+
+Button.ctl:hover {
+    background: #1f3a4d;
+    color: #36f9f6;
+}
+
+/* live "currently active" highlight, toggled from _mark_active() */
+Button.ctl.active {
+    background: #00ff9c;
+    color: #04121a;
+    text-style: bold;
+    border: tall #00ff9c;
+}
+
+.inlabel {
+    color: #4b5263;
+    margin: 1 1 0 2;
+}
+
+.hexinput {
+    width: 14;
+    background: #16202e;
+    color: #ff2e88;
+    border: tall #2a3b4d;
+}
+
+.curveinput {
+    width: 1fr;
+    margin: 0 1 0 0;
+    background: #16202e;
+    color: #36f9f6;
+    border: tall #2a3b4d;
+}
+
+/* compact colour-swatch buttons in the Aura editor */
+Button.ctl.swatch {
+    min-width: 9;
+}
+
+/* destructive actions (kill / force-kill / confirm) */
+Button.ctl.danger {
+    color: #ff3355;
+    border: tall #5a2230;
+}
+Button.ctl.danger:hover {
+    background: #3a1820;
+    color: #ff3355;
+}
+
+/* process table */
+#proc_table {
+    height: 1fr;
+    min-height: 10;
+    margin: 0 1 1 1;
+    background: #0c1320;
+    border: tall #1f2d3d;
+}
+#proc_table > .datatable--cursor {
+    background: #00ff9c;
+    color: #04121a;
+}
+#proc_table > .datatable--header {
+    background: #0d1b2a;
+    color: #36f9f6;
+    text-style: bold;
+}
+
+/* kill confirmation modal */
+ConfirmKill {
+    align: center middle;
+    background: #04070c 75%;
+}
+#dialog {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    background: #0d1b2a;
+    border: thick #ff3355;
+}
+#dlg_title {
+    width: 100%;
+    color: #ff3355;
+    text-style: bold;
+    content-align: center middle;
+}
+#dlg_proc {
+    width: 100%;
+    color: #c9d1d9;
+    content-align: center middle;
+    margin: 1 0 0 0;
+}
+#dlg_sig {
+    width: 100%;
+    color: #4b5263;
+    content-align: center middle;
+}
+#dlg_btns {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+    margin: 1 0 0 0;
+}

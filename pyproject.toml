@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "armoury-tui"
+version = "1.0.0"
+description = "An ASUS Armoury-Crate-style monitoring and control TUI for Linux laptops (ROG/TUF)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sameer" }]
+keywords = ["asus", "rog", "tuf", "tui", "armoury-crate", "hwmon", "asusctl"]
+dependencies = [
+    "textual>=0.60",
+    "psutil>=5.9",
+    "rich>=13.0",
+]
+
+[project.scripts]
+armoury-tui = "armoury_tui.__main__:main"
+
+[tool.setuptools]
+packages = ["armoury_tui"]
+
+[tool.setuptools.package-data]
+armoury_tui = ["styles.tcss"]

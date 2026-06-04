@@ -1,0 +1,31 @@
+[package]
+name = "armoury-tui"
+version = "0.1.0"
+edition = "2021"
+description = "ASUS Armoury-Crate-style monitoring and control TUI for Linux laptops (ROG/TUF) — Rust rewrite."
+license = "MIT"
+authors = ["Sameer"]
+keywords = ["asus", "rog", "tuf", "tui", "hwmon"]
+readme = "../README.md"
+
+[[bin]]
+name = "armoury-tui"
+path = "src/main.rs"
+
+[dependencies]
+# Phase 0 — scaffold: TUI loop, async runtime, CLI.
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+# Phase A — native telemetry sources (no CLI scraping).
+sysinfo = "0.33"            # CPU/mem/process + per-iface IPv4
+nvml-wrapper = "0.10"       # NVIDIA GPU (libnvidia-ml), replaces nvidia-smi CSV
+zbus = "5"                  # UPower battery energy-rate (blocking API), replaces upower regex
+
+# Deferred — added as each phase needs them (see plan):
+#   Phase B: zbus (asusd)
+#   Phase C: nix, tui-input

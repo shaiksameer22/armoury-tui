@@ -1,0 +1,13 @@
+# Rust
+rust/target/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Telemetry logs from --log
+*.csv

@@ -1,0 +1,6 @@
+# Runtime dependencies for armoury-tui.
+# Versions pinned to "known-good or newer" — both were already present on the
+# reference TUF A15 (textual 8.2.5, psutil 7.2.2).
+textual>=0.60
+psutil>=5.9
+rich>=13.0        # pulled in by textual, listed explicitly as we import it directly

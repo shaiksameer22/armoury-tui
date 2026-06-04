@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Single command to launch armoury-tui (Rust build).
+#
+#   ./armoury              # launch the TUI
+#   ./armoury --probe      # print discovered hardware and exit
+#   ./armoury --once       # print one telemetry snapshot and exit
+#   ./armoury -i 2 --log run.csv
+#
+# Builds the release binary on first run (and after edits); subsequent launches
+# are instant. For a PATH-wide command instead, run:  cargo install --path rust
+set -euo pipefail
+# Resolve through symlinks so this works when linked onto $PATH (e.g. ~/.local/bin/armoury).
+DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+cargo build --release --quiet --manifest-path "$DIR/rust/Cargo.toml"
+exec "$DIR/rust/target/release/armoury-tui" "$@"
