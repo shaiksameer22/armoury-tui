@@ -10,6 +10,7 @@
 //! `--probe` / `--once` are stubbed until Phase A lands the data layer.
 
 mod app;
+mod config;
 mod control;
 mod dbus;
 mod render;

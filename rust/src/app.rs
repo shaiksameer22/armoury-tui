@@ -24,16 +24,13 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
+use crate::config::Config;
 use crate::control::{ControlResult, Controller, FanCurve};
 use crate::render::{self, amber, cyan, dim, magenta, neon, red, text};
 use crate::scanner::HardwareMap;
 use crate::telemetry::{kill_process, NetConn, ProcDetail, ProcInfo, Snapshot, Telemetry};
 
 const HIST: usize = 60; // samples kept for sparklines / trend graphs
-const CPU_TEMP_ALERT: f64 = 90.0;
-const GPU_TEMP_ALERT: f64 = 87.0;
-const BATT_LOW_PCT: f64 = 15.0;    // discharging-and-below → alert
-const FAN_STALL_TEMP: f64 = 75.0;  // 0 RPM above this → alert
 const PROC_ROWS: usize = 40; // max rows shown in the process table
 
 const TABS: [&str; 5] = [
@@ -65,6 +62,7 @@ enum Act {
     FullCharge,
     AutoSwitch(bool), // on_ac
     CycleEpp,
+    Preset(String),
 }
 
 struct App {
@@ -99,6 +97,8 @@ struct App {
     help: bool,
     batt_alerted: bool,
     fan_alerted: bool,
+    cfg: Config,
+    applied_rule: Option<usize>,
 
     cpu_hist: VecDeque<f64>,
     gpu_hist: VecDeque<f64>,
@@ -118,6 +118,9 @@ impl App {
         // Default the fan-curve editor to whichever profile is enabled, else Performance.
         let curve_profile = "Performance".to_string();
         let log = log_path.and_then(|p| open_log(&p));
+        let cfg = Config::load();
+        crate::theme::set_by_label(&cfg.theme);
+        let tab = cfg.startup_tab.min(TABS.len() - 1);
         App {
             hw,
             tel: Arc::new(Mutex::new(tel)),
@@ -131,7 +134,7 @@ impl App {
             auto: None,
             epps: None,
             log,
-            tab: 0,
+            tab,
             latest: None,
             toast: None,
             alert_cpu: false,
@@ -147,6 +150,8 @@ impl App {
             help: false,
             batt_alerted: false,
             fan_alerted: false,
+            cfg,
+            applied_rule: None,
             cpu_hist: VecDeque::with_capacity(HIST),
             gpu_hist: VecDeque::with_capacity(HIST),
             cputemp_hist: VecDeque::with_capacity(HIST),
@@ -166,6 +171,7 @@ impl App {
         };
         self.push_history(&snap);
         self.check_alerts(&snap);
+        self.eval_rules(&snap).await;
         self.write_log(&snap);
         self.latest = Some(snap);
         // Connections enumeration scans /proc — only do it while the tab is open.
@@ -446,11 +452,13 @@ impl App {
                     self.run_ctl("EPP…", move |c| c.cycle_epp(&prof)).await;
                 }
             }
+            Act::Preset(name) => self.apply_preset(&name).await,
         }
     }
 
     fn cycle_theme(&mut self) {
         let name = crate::theme::cycle();
+        self.cfg.theme = name.to_string();
         self.set_toast(format!("theme → {name}"), neon());
     }
 
@@ -559,18 +567,20 @@ impl App {
 
     /// Rising-edge thermal alerts (cool→hot only, so we don't spam).
     fn check_alerts(&mut self, s: &Snapshot) {
+        let (cpu_lim, gpu_lim, batt_lim, fan_lim) =
+            (self.cfg.cpu_temp_alert, self.cfg.gpu_temp_alert, self.cfg.batt_low_pct, self.cfg.fan_stall_temp);
         if let Some(t) = s.cpu.temp_c {
-            let hot = t >= CPU_TEMP_ALERT;
+            let hot = t >= cpu_lim;
             if hot && !self.alert_cpu {
-                self.set_toast(format!("⚠ CPU hit {t:.0}°C (≥{CPU_TEMP_ALERT:.0}°C)"), red());
+                self.set_toast(format!("⚠ CPU hit {t:.0}°C (≥{cpu_lim:.0}°C)"), red());
             }
             self.alert_cpu = hot;
         }
         if s.gpu.present {
             if let Some(t) = s.gpu.temp_c {
-                let hot = t >= GPU_TEMP_ALERT;
+                let hot = t >= gpu_lim;
                 if hot && !self.alert_gpu {
-                    self.set_toast(format!("⚠ GPU hit {t:.0}°C (≥{GPU_TEMP_ALERT:.0}°C)"), red());
+                    self.set_toast(format!("⚠ GPU hit {t:.0}°C (≥{gpu_lim:.0}°C)"), red());
                 }
                 self.alert_gpu = hot;
             }
@@ -579,19 +589,67 @@ impl App {
         let b = &s.battery;
         if b.present {
             let discharging = b.rate_w.map(|r| r < 0.0).unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
-            let low = b.percent.map(|p| p < BATT_LOW_PCT).unwrap_or(false) && discharging;
+            let low = b.percent.map(|p| p < batt_lim).unwrap_or(false) && discharging;
             if low && !self.batt_alerted {
                 self.set_toast(format!("⚠ battery low: {:.0}%", b.percent.unwrap_or(0.0)), red());
             }
             self.batt_alerted = low;
         }
         // Fan reads 0 RPM while the CPU is hot.
-        let hot = s.cpu.temp_c.map(|t| t >= FAN_STALL_TEMP).unwrap_or(false);
+        let hot = s.cpu.temp_c.map(|t| t >= fan_lim).unwrap_or(false);
         let stalled = hot && !s.fans.is_empty() && s.fans.iter().any(|f| f.rpm == 0);
         if stalled && !self.fan_alerted {
             self.set_toast("⚠ fan reads 0 RPM while hot".into(), red());
         }
         self.fan_alerted = stalled;
+    }
+
+    /// Apply config rules: when discharging below a threshold, apply its preset
+    /// once (rising edge tracked by `applied_rule`).
+    async fn eval_rules(&mut self, s: &Snapshot) {
+        if self.cfg.rules.is_empty() {
+            return;
+        }
+        let b = &s.battery;
+        let discharging = b.present
+            && b.rate_w.map(|r| r < 0.0).unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
+        let pct = b.percent.unwrap_or(100.0);
+        let hit = if discharging {
+            self.cfg.rules.iter().position(|r| pct < r.battery_below as f64)
+        } else {
+            None
+        };
+        if hit != self.applied_rule {
+            self.applied_rule = hit;
+            if let Some(i) = hit {
+                let preset = self.cfg.rules[i].preset.clone();
+                self.apply_preset(&preset).await;
+            }
+        }
+    }
+
+    /// Apply a named preset's profile / charge limit / brightness in one shot.
+    async fn apply_preset(&mut self, name: &str) {
+        let Some(p) = self.cfg.preset(name).cloned() else {
+            self.set_toast(format!("no preset '{name}'"), amber());
+            return;
+        };
+        self.set_toast(format!("preset → {name}"), neon());
+        let ctl = Arc::clone(&self.control);
+        let _ = tokio::task::spawn_blocking(move || {
+            let c = ctl.lock().unwrap();
+            if let Some(pr) = &p.profile {
+                c.set_profile(pr);
+            }
+            if let Some(cl) = p.charge_limit {
+                c.set_charge_limit(cl);
+            }
+            if let Some(br) = p.brightness {
+                c.set_brightness(br);
+            }
+        })
+        .await;
+        self.reload_curves().await;
     }
 
     fn set_toast(&mut self, msg: String, color: ratatui::style::Color) {
@@ -653,6 +711,11 @@ pub async fn run(refresh: f64, log_path: Option<String>) -> Result<()> {
     let result = event_loop(&mut terminal, &mut app, refresh).await;
     let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
+
+    // Persist last tab + theme for next launch.
+    app.cfg.startup_tab = app.tab;
+    app.cfg.theme = crate::theme::current_label().to_string();
+    let _ = app.cfg.save();
     result
 }
 
@@ -998,12 +1061,22 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         labeled_buttons(frame, app, r[3], "auto/epp", auto_btns);
     }
 
+    let presets: Vec<(String, bool, Act)> = app
+        .cfg
+        .presets
+        .iter()
+        .map(|p| (format!("◈ {}", p.name), false, Act::Preset(p.name.clone())))
+        .collect();
+    if !presets.is_empty() {
+        labeled_buttons(frame, app, r[4], "presets", presets);
+    }
+
     let hint = if app.control_available {
-        Span::styled("keys  p [ ] s c v e d x  ·  f full-charge  a/b auto  g epp", Style::new().fg(dim()))
+        Span::styled("p [ ] s c v e d x · f full-charge · a/b auto · g epp · ◈ presets (edit config.toml)", Style::new().fg(dim()))
     } else {
         Span::styled("asusd unreachable — controls disabled", Style::new().fg(red()))
     };
-    frame.render_widget(Paragraph::new(hint), r[4]);
+    frame.render_widget(Paragraph::new(hint), r[5]);
 }
 
 fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {

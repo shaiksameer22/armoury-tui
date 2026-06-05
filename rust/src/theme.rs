@@ -98,3 +98,15 @@ pub fn cycle() -> &'static str {
     IDX.store(n, Ordering::Relaxed);
     THEMES[n].label
 }
+
+/// The active theme's label.
+pub fn current_label() -> &'static str {
+    current().label
+}
+
+/// Select a theme by label (case-insensitive); no-op if unknown.
+pub fn set_by_label(label: &str) {
+    if let Some(i) = THEMES.iter().position(|t| t.label.eq_ignore_ascii_case(label)) {
+        IDX.store(i, Ordering::Relaxed);
+    }
+}

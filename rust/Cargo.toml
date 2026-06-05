@@ -29,3 +29,5 @@ zbus = "5"                  # UPower battery energy-rate (blocking API), replace
 # Phase C — process control.
 nix = { version = "0.29", features = ["signal", "process"] }   # SIGTERM/SIGKILL + getppid
 procfs = "0.17"            # active socket enumeration (connections panel)
+serde = { version = "1", features = ["derive"] }   # config (de)serialisation
+toml = "0.8"               # ~/.config/armoury-tui/config.toml
