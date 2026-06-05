@@ -57,8 +57,7 @@ fn profile_int(name: &str) -> Option<u32> {
     }
 }
 
-#[allow(dead_code)] // reverse map, exercised by the profile_roundtrip test
-fn profile_name(i: u32) -> Option<&'static str> {
+pub fn profile_name(i: u32) -> Option<&'static str> {
     match i {
         0 => Some("Balanced"),
         1 => Some("Performance"),
@@ -133,6 +132,80 @@ impl Controller {
         let pct = percent.clamp(20, 100) as u8;
         match bus.platform().and_then(|p| p.set_property("ChargeControlEndThreshold", pct).map_err(Into::into)) {
             Ok(()) => ControlResult::ok(format!("charge limit → {pct}%")),
+            Err(e) => ControlResult::err(first_line(&e.to_string())),
+        }
+    }
+
+    /// Charge to 100% once (for travel), then revert to the standing limit.
+    pub fn one_shot_full_charge(&self) -> ControlResult {
+        let bus = match self.bus() {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        match bus.platform().and_then(|p| p.call_method("OneShotFullCharge", &()).map(|_| ()).map_err(Into::into)) {
+            Ok(()) => ControlResult::ok("one-shot full charge armed"),
+            Err(e) => ControlResult::err(first_line(&e.to_string())),
+        }
+    }
+
+    // -- auto profile (on AC / on battery) --------------------------------
+
+    /// (profile_on_ac, profile_on_battery, auto_switch_ac, auto_switch_battery).
+    pub fn auto_profiles(&self) -> Option<(u32, u32, bool, bool)> {
+        let p = self.bus.as_ref()?.platform().ok()?;
+        Some((
+            p.get_property("PlatformProfileOnAc").ok()?,
+            p.get_property("PlatformProfileOnBattery").ok()?,
+            p.get_property("ChangePlatformProfileOnAc").ok()?,
+            p.get_property("ChangePlatformProfileOnBattery").ok()?,
+        ))
+    }
+
+    /// Toggle automatic profile switching when (un)plugging.
+    pub fn set_auto_switch(&self, on_ac: bool, enabled: bool) -> ControlResult {
+        let bus = match self.bus() {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let prop = if on_ac { "ChangePlatformProfileOnAc" } else { "ChangePlatformProfileOnBattery" };
+        match bus.platform().and_then(|p| p.set_property(prop, enabled).map_err(Into::into)) {
+            Ok(()) => ControlResult::ok(format!("auto profile on {} → {}", if on_ac { "AC" } else { "battery" }, if enabled { "on" } else { "off" })),
+            Err(e) => ControlResult::err(first_line(&e.to_string())),
+        }
+    }
+
+    // -- EPP (energy-performance preference, per profile) -----------------
+
+    /// (balanced_epp, performance_epp, quiet_epp) raw ints.
+    pub fn epps(&self) -> Option<(u32, u32, u32)> {
+        let p = self.bus.as_ref()?.platform().ok()?;
+        Some((
+            p.get_property("ProfileBalancedEpp").ok()?,
+            p.get_property("ProfilePerformanceEpp").ok()?,
+            p.get_property("ProfileQuietEpp").ok()?,
+        ))
+    }
+
+    /// Cycle the EPP (0–4) of one profile. asusd's EPP enum mirrors the kernel
+    /// scale (0 performance … 4 power-save); we rotate through it.
+    pub fn cycle_epp(&self, profile: &str) -> ControlResult {
+        let bus = match self.bus() {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let prop = match profile {
+            "Balanced" => "ProfileBalancedEpp",
+            "Performance" => "ProfilePerformanceEpp",
+            "Quiet" => "ProfileQuietEpp",
+            _ => return ControlResult::err(format!("no EPP for profile '{profile}'")),
+        };
+        let Ok(p) = bus.platform() else {
+            return ControlResult::err("asusd platform unavailable");
+        };
+        let cur: u32 = p.get_property(prop).unwrap_or(0);
+        let next = (cur + 1) % 5;
+        match p.set_property(prop, next) {
+            Ok(()) => ControlResult::ok(format!("{profile} EPP → {} ({next})", epp_name(next))),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
     }
@@ -255,6 +328,18 @@ impl Controller {
             Ok(()) => ControlResult::ok(format!("{profile} curves reset to default")),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
+    }
+}
+
+/// Best-effort label for an EPP int (kernel energy-performance-preference scale).
+pub fn epp_name(epp: u32) -> &'static str {
+    match epp {
+        0 => "performance",
+        1 => "balance-perf",
+        2 => "default",
+        3 => "balance-power",
+        4 => "power-save",
+        _ => "epp",
     }
 }
 

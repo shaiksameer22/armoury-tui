@@ -305,6 +305,27 @@ pub fn battery_panel(s: &Snapshot) -> Paragraph<'static> {
             Span::styled(b.charge_limit.map(|l| format!("{l}%")).unwrap_or_else(|| "—".into()), Style::new().fg(magenta())),
         ]));
     }
+    // Health (full/design), cycle count, and estimated time-remaining.
+    let mut hl: Vec<Span> = Vec::new();
+    if let Some(h) = b.health_pct {
+        let hcol = if h >= 80.0 { neon() } else if h >= 60.0 { amber() } else { red() };
+        hl.push(Span::styled(format!("{:<9}", "health"), Style::new().fg(dim())));
+        hl.push(Span::styled(format!("{h:.0}%  "), Style::new().fg(hcol)));
+    }
+    if let Some(c) = b.cycle_count.filter(|&c| c > 0) {
+        hl.push(Span::styled(format!("{:<8}", "cycles"), Style::new().fg(dim())));
+        hl.push(Span::styled(format!("{c}"), Style::new().fg(text())));
+    }
+    if !hl.is_empty() {
+        lines.push(Line::from(hl));
+    }
+    let charging = b.status.eq_ignore_ascii_case("charging");
+    if let Some(secs) = if charging { b.time_to_full_s } else { b.time_to_empty_s } {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<9}", if charging { "to full" } else { "remaining" }), Style::new().fg(dim())),
+            Span::styled(format!("{}h {}m", secs / 3600, (secs % 3600) / 60), Style::new().fg(cyan())),
+        ]));
+    }
     panel(Text::from(lines), "BATTERY", amber())
 }
 

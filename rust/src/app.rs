@@ -60,6 +60,9 @@ enum Act {
     Kill(bool),
     ConfirmKill(bool), // true = go ahead, false = cancel
     CycleTheme,
+    FullCharge,
+    AutoSwitch(bool), // on_ac
+    CycleEpp,
 }
 
 struct App {
@@ -72,6 +75,8 @@ struct App {
     curves: Vec<FanCurve>,
     aura_mode: Option<u32>,
     aura_supported: Vec<u32>,
+    auto: Option<(u32, u32, bool, bool)>, // profile on_ac/on_bat, auto-switch ac/bat
+    epps: Option<(u32, u32, u32)>,        // balanced/performance/quiet EPP
     log: Option<std::fs::File>,
     tab: usize,
     latest: Option<Snapshot>,
@@ -117,6 +122,8 @@ impl App {
             curves: Vec::new(),
             aura_mode: None,
             aura_supported: Vec::new(),
+            auto: None,
+            epps: None,
             log,
             tab: 0,
             latest: None,
@@ -183,13 +190,15 @@ impl App {
         let prof = self.curve_profile.clone();
         let res = tokio::task::spawn_blocking(move || {
             let c = ctl.lock().unwrap();
-            (c.get_fan_curves(&prof), c.current_aura_mode(), c.supported_aura_modes())
+            (c.get_fan_curves(&prof), c.current_aura_mode(), c.supported_aura_modes(), c.auto_profiles(), c.epps())
         })
         .await;
-        if let Ok((curves, mode, supported)) = res {
+        if let Ok((curves, mode, supported, auto, epps)) = res {
             self.curves = curves;
             self.aura_mode = mode;
             self.aura_supported = supported;
+            self.auto = auto;
+            self.epps = epps;
         }
     }
 
@@ -324,6 +333,10 @@ impl App {
                     KeyCode::Char('e') => self.curve_enable(true).await,
                     KeyCode::Char('d') => self.curve_enable(false).await,
                     KeyCode::Char('x') => self.curve_reset().await,
+                    KeyCode::Char('f') => self.dispatch(Act::FullCharge).await,
+                    KeyCode::Char('a') => self.dispatch(Act::AutoSwitch(true)).await,
+                    KeyCode::Char('b') => self.dispatch(Act::AutoSwitch(false)).await,
+                    KeyCode::Char('g') => self.dispatch(Act::CycleEpp).await,
                     _ => {}
                 },
                 2 => match code {
@@ -392,6 +405,19 @@ impl App {
                 }
             }
             Act::CycleTheme => self.cycle_theme(),
+            Act::FullCharge => self.run_ctl("one-shot full charge…", |c| c.one_shot_full_charge()).await,
+            Act::AutoSwitch(on_ac) => {
+                let enabled = match self.auto {
+                    Some((_, _, ac, bat)) => !(if on_ac { ac } else { bat }),
+                    None => true,
+                };
+                self.run_ctl("auto profile…", move |c| c.set_auto_switch(on_ac, enabled)).await;
+            }
+            Act::CycleEpp => {
+                if let Some(prof) = self.current_profile() {
+                    self.run_ctl("EPP…", move |c| c.cycle_epp(&prof)).await;
+                }
+            }
         }
     }
 
@@ -795,7 +821,7 @@ fn draw_power(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // controls (profile / charge / legend)
+            Constraint::Length(9),  // controls (profile / charge / curve / auto-epp)
             Constraint::Length(10), // fan-curve editor
             Constraint::Min(8),     // fan graph
             Constraint::Length(6),  // battery
@@ -821,7 +847,7 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     }
     let r = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1); 5])
+        .constraints([Constraint::Length(1); 7])
         .split(inner);
 
     let cur = s.profile.clone();
@@ -838,7 +864,11 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         app,
         r[1],
         &format!("charge {limit}"),
-        vec![("−5%".into(), false, Act::Charge(-5)), ("+5%".into(), false, Act::Charge(5))],
+        vec![
+            ("−5%".into(), false, Act::Charge(-5)),
+            ("+5%".into(), false, Act::Charge(5)),
+            ("⚡ full once".into(), false, Act::FullCharge),
+        ],
     );
 
     labeled_buttons(
@@ -856,12 +886,32 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         ],
     );
 
+    // Auto profile (on AC / on battery) + EPP for the active profile.
+    let mut auto_btns: Vec<(String, bool, Act)> = Vec::new();
+    if let Some((ppoa, ppob, cac, cbat)) = app.auto {
+        let pn = |i| crate::control::profile_name(i).unwrap_or("?");
+        auto_btns.push((format!("AC:{} {}", pn(ppoa), if cac { "✓" } else { "✗" }), cac, Act::AutoSwitch(true)));
+        auto_btns.push((format!("bat:{} {}", pn(ppob), if cbat { "✓" } else { "✗" }), cbat, Act::AutoSwitch(false)));
+    }
+    if let Some((bal, perf, quiet)) = app.epps {
+        let epp = match cur.as_deref() {
+            Some("Balanced") => bal,
+            Some("Performance") => perf,
+            Some("Quiet") => quiet,
+            _ => bal,
+        };
+        auto_btns.push((format!("EPP:{}", crate::control::epp_name(epp)), false, Act::CycleEpp));
+    }
+    if !auto_btns.is_empty() {
+        labeled_buttons(frame, app, r[3], "auto/epp", auto_btns);
+    }
+
     let hint = if app.control_available {
-        Span::styled("click a control, or use keys  p [ ] s c v e d x", Style::new().fg(dim()))
+        Span::styled("keys  p [ ] s c v e d x  ·  f full-charge  a/b auto  g epp", Style::new().fg(dim()))
     } else {
         Span::styled("asusd unreachable — controls disabled", Style::new().fg(red()))
     };
-    frame.render_widget(Paragraph::new(hint), r[3]);
+    frame.render_widget(Paragraph::new(hint), r[4]);
 }
 
 fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {

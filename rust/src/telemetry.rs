@@ -82,6 +82,10 @@ pub struct BatterySample {
     pub rate_w: Option<f64>, // signed: + charging, - discharging
     pub charge_limit: Option<i64>,
     pub ac_online: Option<bool>,
+    pub health_pct: Option<f64>,    // full / design capacity
+    pub cycle_count: Option<i64>,
+    pub time_to_empty_s: Option<i64>,
+    pub time_to_full_s: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -389,6 +393,10 @@ impl Telemetry {
             .and_then(|a| sysfs::read_int(a.join("online")))
             .map(|v| v != 0);
         let rate = self.battery_rate(bat, &status);
+        // Health = full / design capacity (charge_* in µAh, else energy_* in µWh).
+        let health_pct = capacity_ratio(bat, "charge").or_else(|| capacity_ratio(bat, "energy"));
+        let cycle_count = sysfs::read_int(bat.join("cycle_count"));
+        let (time_to_empty_s, time_to_full_s) = self.upower_times();
         BatterySample {
             present: true,
             percent,
@@ -396,7 +404,23 @@ impl Telemetry {
             rate_w: rate,
             charge_limit,
             ac_online,
+            health_pct,
+            cycle_count,
+            time_to_empty_s,
+            time_to_full_s,
         }
+    }
+
+    /// UPower TimeToEmpty / TimeToFull in seconds (0 → unknown → None).
+    fn upower_times(&self) -> (Option<i64>, Option<i64>) {
+        let (Some(conn), Some(path)) = (self.upower_conn.as_ref(), self.upower_path.as_ref()) else {
+            return (None, None);
+        };
+        let Ok(proxy) = zbus::blocking::Proxy::new(conn, "org.freedesktop.UPower", path.as_str(), "org.freedesktop.UPower.Device") else {
+            return (None, None);
+        };
+        let pos = |v: zbus::Result<i64>| v.ok().filter(|&s| s > 0);
+        (pos(proxy.get_property("TimeToEmpty")), pos(proxy.get_property("TimeToFull")))
     }
 
     /// Signed power flow in watts (+ charging, - discharging). Prefers UPower's
@@ -615,6 +639,13 @@ impl Telemetry {
             gpu_procs: self.gpu_processes(),
         }
     }
+}
+
+/// full / design capacity as a percent, for `kind` in {"charge","energy"}.
+fn capacity_ratio(bat: &Path, kind: &str) -> Option<f64> {
+    let full = sysfs::read_int(bat.join(format!("{kind}_full")))?;
+    let design = sysfs::read_int(bat.join(format!("{kind}_full_design")))?;
+    (design > 0).then(|| full as f64 / design as f64 * 100.0)
 }
 
 fn gpu_amd(dir: &Path) -> GpuSample {
