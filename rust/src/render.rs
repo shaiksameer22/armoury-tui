@@ -575,6 +575,38 @@ pub fn net_table(s: &Snapshot) -> Paragraph<'static> {
     panel(Text::from(lines), "INTERFACES  (* = virtual)", cyan())
 }
 
+pub fn connections_panel(conns: &[crate::telemetry::NetConn]) -> Paragraph<'static> {
+    if conns.is_empty() {
+        return panel(Text::styled("no active inet connections", Style::new().fg(dim())), "CONNECTIONS", blue());
+    }
+    let est = conns.iter().filter(|c| c.status == "ESTABLISHED").count();
+    let lis = conns.iter().filter(|c| c.status == "LISTEN").count();
+    let cut = |s: &str, n: usize| -> String { s.chars().take(n).collect() };
+    let mut lines: Vec<Line> = vec![Line::from(vec![
+        Span::styled(format!("{:<6}", "proto"), Style::new().fg(dim())),
+        Span::styled(format!("{:<24}", "local"), Style::new().fg(dim())),
+        Span::styled(format!("{:<24}", "remote"), Style::new().fg(dim())),
+        Span::styled(format!("{:<12}", "state"), Style::new().fg(dim())),
+        Span::styled("process", Style::new().fg(dim())),
+    ])];
+    for c in conns.iter().take(16) {
+        let scol = match c.status.as_str() {
+            "ESTABLISHED" => neon(),
+            "LISTEN" => amber(),
+            _ => dim(),
+        };
+        let proc = format!("{}{}", c.pname, c.pid.map(|p| format!(" ({p})")).unwrap_or_default());
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<6}", c.proto), Style::new().fg(dim())),
+            Span::styled(format!("{:<24}", cut(&c.laddr, 23)), Style::new().fg(cyan())),
+            Span::styled(format!("{:<24}", cut(&c.raddr, 23)), Style::new().fg(text())),
+            Span::styled(format!("{:<12}", c.status), Style::new().fg(scol)),
+            Span::styled(proc, Style::new().fg(magenta())),
+        ]));
+    }
+    panel(Text::from(lines), &format!("CONNECTIONS  ({est} established, {lis} listening)"), blue())
+}
+
 pub fn bandwidth_graph_panel(down_hist: &[f64], up_hist: &[f64], cur_down: f64, cur_up: f64) -> Paragraph<'static> {
     let dmax = down_hist.iter().cloned().fold(0.0_f64, f64::max).max(1024.0);
     let umax = up_hist.iter().cloned().fold(0.0_f64, f64::max).max(1024.0);

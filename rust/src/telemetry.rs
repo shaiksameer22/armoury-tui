@@ -111,6 +111,17 @@ pub struct NetIface {
     pub dropout: u64,
 }
 
+/// One active inet socket (Network tab, on-demand).
+#[derive(Debug, Clone)]
+pub struct NetConn {
+    pub proto: &'static str,
+    pub laddr: String,
+    pub raddr: String,
+    pub status: String,
+    pub pname: String,
+    pub pid: Option<i32>,
+}
+
 // pid / mem_pct / name feed the Phase C interactive process & GPU-process tables.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -560,6 +571,56 @@ impl Telemetry {
             start_time: p.start_time(),
             cmd: if cmd.is_empty() { "—".into() } else { cmd },
         })
+    }
+
+    /// Active inet sockets, ESTABLISHED first, with owning process names.
+    /// Reads /proc as the normal user; sockets we don't own report pid=None.
+    pub fn connections(&self, limit: usize) -> Vec<NetConn> {
+        // Map socket inode -> (pid, comm) by scanning every process's fds.
+        let mut owner: HashMap<u64, (i32, String)> = HashMap::new();
+        if let Ok(procs) = procfs::process::all_processes() {
+            for p in procs.flatten() {
+                let comm = p.stat().map(|s| s.comm).unwrap_or_default();
+                if let Ok(fds) = p.fd() {
+                    for fd in fds.flatten() {
+                        if let procfs::process::FDTarget::Socket(ino) = fd.target {
+                            owner.entry(ino).or_insert((p.pid, comm.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        let mut out: Vec<NetConn> = Vec::new();
+        let mut push = |proto: &'static str, laddr: String, raddr: String, status: String, inode: u64| {
+            let (pid, pname) = match owner.get(&inode) {
+                Some((pid, name)) => (Some(*pid), name.clone()),
+                None => (None, "—".into()),
+            };
+            out.push(NetConn { proto, laddr, raddr, status, pname, pid });
+        };
+        if let Ok(t) = procfs::net::tcp() {
+            for e in t {
+                push("tcp", e.local_address.to_string(), e.remote_address.to_string(), format!("{:?}", e.state).to_uppercase(), e.inode);
+            }
+        }
+        if let Ok(t) = procfs::net::tcp6() {
+            for e in t {
+                push("tcp6", e.local_address.to_string(), e.remote_address.to_string(), format!("{:?}", e.state).to_uppercase(), e.inode);
+            }
+        }
+        if let Ok(u) = procfs::net::udp() {
+            for e in u {
+                push("udp", e.local_address.to_string(), e.remote_address.to_string(), "-".into(), e.inode);
+            }
+        }
+        let rank = |s: &str| match s {
+            "ESTABLISHED" => 0,
+            "LISTEN" => 1,
+            _ => 2,
+        };
+        out.sort_by_key(|c| (rank(&c.status), c.proto));
+        out.truncate(limit);
+        out
     }
 
     fn gpu_processes(&self) -> Vec<GpuProc> {

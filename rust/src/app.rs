@@ -27,11 +27,13 @@ use ratatui::Frame;
 use crate::control::{ControlResult, Controller, FanCurve};
 use crate::render::{self, amber, cyan, dim, magenta, neon, red, text};
 use crate::scanner::HardwareMap;
-use crate::telemetry::{kill_process, ProcDetail, ProcInfo, Snapshot, Telemetry};
+use crate::telemetry::{kill_process, NetConn, ProcDetail, ProcInfo, Snapshot, Telemetry};
 
 const HIST: usize = 60; // samples kept for sparklines / trend graphs
 const CPU_TEMP_ALERT: f64 = 90.0;
 const GPU_TEMP_ALERT: f64 = 87.0;
+const BATT_LOW_PCT: f64 = 15.0;    // discharging-and-below → alert
+const FAN_STALL_TEMP: f64 = 75.0;  // 0 RPM above this → alert
 const PROC_ROWS: usize = 40; // max rows shown in the process table
 
 const TABS: [&str; 5] = [
@@ -93,6 +95,10 @@ struct App {
     selected_pid: Option<u32>,
     detail: Option<ProcDetail>,
     confirm: Option<(u32, String, bool)>, // pid, name, force — kill dialog
+    connections: Vec<NetConn>,
+    help: bool,
+    batt_alerted: bool,
+    fan_alerted: bool,
 
     cpu_hist: VecDeque<f64>,
     gpu_hist: VecDeque<f64>,
@@ -137,6 +143,10 @@ impl App {
             selected_pid: None,
             detail: None,
             confirm: None,
+            connections: Vec::new(),
+            help: false,
+            batt_alerted: false,
+            fan_alerted: false,
             cpu_hist: VecDeque::with_capacity(HIST),
             gpu_hist: VecDeque::with_capacity(HIST),
             cputemp_hist: VecDeque::with_capacity(HIST),
@@ -158,6 +168,13 @@ impl App {
         self.check_alerts(&snap);
         self.write_log(&snap);
         self.latest = Some(snap);
+        // Connections enumeration scans /proc — only do it while the tab is open.
+        if self.tab == 3 {
+            let tel = Arc::clone(&self.tel);
+            if let Ok(c) = tokio::task::spawn_blocking(move || tel.lock().unwrap().connections(60)).await {
+                self.connections = c;
+            }
+        }
     }
 
     // -- controls (Phase B) -----------------------------------------------
@@ -316,9 +333,16 @@ impl App {
             return false;
         }
 
+        // Any key dismisses the help overlay.
+        if self.help {
+            self.help = false;
+            return false;
+        }
+
         match key.code {
             KeyCode::Char('c') if ctrl => return true,
             KeyCode::Char('q') | KeyCode::Esc => return true,
+            KeyCode::Char('?') => self.help = true,
             KeyCode::Char('r') => self.collect().await,
             KeyCode::Char('t') => self.cycle_theme(),
             KeyCode::Char(c @ '1'..='5') => self.tab = c as usize - '1' as usize,
@@ -365,6 +389,10 @@ impl App {
 
     async fn handle_mouse(&mut self, ev: crossterm::event::MouseEvent) {
         if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+        if self.help {
+            self.help = false;
             return;
         }
         let (col, row) = (ev.column, ev.row);
@@ -547,6 +575,23 @@ impl App {
                 self.alert_gpu = hot;
             }
         }
+        // Battery low (rising edge), only while discharging.
+        let b = &s.battery;
+        if b.present {
+            let discharging = b.rate_w.map(|r| r < 0.0).unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
+            let low = b.percent.map(|p| p < BATT_LOW_PCT).unwrap_or(false) && discharging;
+            if low && !self.batt_alerted {
+                self.set_toast(format!("⚠ battery low: {:.0}%", b.percent.unwrap_or(0.0)), red());
+            }
+            self.batt_alerted = low;
+        }
+        // Fan reads 0 RPM while the CPU is hot.
+        let hot = s.cpu.temp_c.map(|t| t >= FAN_STALL_TEMP).unwrap_or(false);
+        let stalled = hot && !s.fans.is_empty() && s.fans.iter().any(|f| f.rpm == 0);
+        if stalled && !self.fan_alerted {
+            self.set_toast("⚠ fan reads 0 RPM while hot".into(), red());
+        }
+        self.fan_alerted = stalled;
     }
 
     fn set_toast(&mut self, msg: String, color: ratatui::style::Color) {
@@ -694,6 +739,8 @@ fn draw(frame: &mut Frame, app: &App) {
             Span::styled("tabs   ", Style::new().fg(dim())),
             Span::styled("r ", Style::new().fg(neon())),
             Span::styled("refresh   ", Style::new().fg(dim())),
+            Span::styled("? ", Style::new().fg(neon())),
+            Span::styled("help   ", Style::new().fg(dim())),
             Span::styled("q ", Style::new().fg(neon())),
             Span::styled("quit", Style::new().fg(dim())),
         ]),
@@ -704,6 +751,51 @@ fn draw(frame: &mut Frame, app: &App) {
     if let Some((pid, name, force)) = &app.confirm {
         draw_confirm(frame, app, *pid, name, *force);
     }
+    if app.help {
+        draw_help(frame);
+    }
+}
+
+fn draw_help(frame: &mut Frame) {
+    let area = frame.area();
+    let w = 64u16.min(area.width);
+    let h = 22u16.min(area.height);
+    let rect = Rect { x: (area.width - w) / 2, y: (area.height - h) / 2, width: w, height: h };
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .title(Span::styled(" KEYS & MOUSE ", Style::new().fg(neon()).add_modifier(Modifier::BOLD)))
+        .border_style(Style::new().fg(neon()));
+    let row = |k: &'static str, d: &'static str| {
+        Line::from(vec![
+            Span::styled(format!("  {k:<10}"), Style::new().fg(neon())),
+            Span::styled(d, Style::new().fg(text())),
+        ])
+    };
+    let head = |t: &'static str| Line::styled(format!("  {t}"), Style::new().fg(magenta()).add_modifier(Modifier::BOLD));
+    let body = vec![
+        head("global"),
+        row("1–5 / click", "switch tab"),
+        row("r", "force refresh"),
+        row("t", "cycle colour theme"),
+        row("? ", "this help    ·    q / Esc  quit"),
+        Line::from(""),
+        head("power / fans"),
+        row("p", "cycle performance profile"),
+        row("[ ]", "charge limit −/+ 5%      f  full-charge once"),
+        row("a / b", "toggle auto profile on AC / battery"),
+        row("g", "cycle EPP for active profile"),
+        row("s", "switch fan-curve profile"),
+        row("c / v", "fan curve cooler / quieter (±5%)"),
+        row("e / d / x", "curve enable / disable / firmware default"),
+        Line::from(""),
+        head("lighting"),
+        row("+ / -", "keyboard brightness     m  cycle aura effect"),
+        Line::from(""),
+        head("processes"),
+        row("c m p n", "sort by CPU / MEM / PID / NAME"),
+        row("/  ↑↓", "filter   ·   select     k / K  kill / force-kill"),
+    ];
+    frame.render_widget(Paragraph::new(Text::from(body)).block(block), rect);
 }
 
 // -- clickable widgets ------------------------------------------------------
@@ -1065,7 +1157,7 @@ fn lighting_panel(app: &App, s: &Snapshot) -> Paragraph<'static> {
 fn draw_network(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(15), Constraint::Min(6)])
+        .constraints([Constraint::Length(15), Constraint::Length(8), Constraint::Min(6)])
         .split(area);
     frame.render_widget(
         render::bandwidth_graph_panel(
@@ -1077,6 +1169,7 @@ fn draw_network(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         rows[0],
     );
     frame.render_widget(render::net_table(s), rows[1]);
+    frame.render_widget(render::connections_panel(&app.connections), rows[2]);
 }
 
 fn draw_placeholder(frame: &mut Frame, area: Rect) {
