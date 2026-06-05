@@ -38,8 +38,10 @@ cd armoury-tui
 armoury                 # launch the TUI
 armoury --probe         # print the discovered hardware map and exit
 armoury --once          # print one text telemetry snapshot and exit
+armoury --json          # one snapshot as JSON (status bars / scripting)
 armoury -i 2            # 2-second refresh
 armoury --log run.csv   # TUI + append one telemetry row per tick to a CSV
+armoury --replay run.csv # summarise a logged CSV (min/avg/max + sparklines)
 ```
 
 `make install` / `make uninstall` / `make run` / `make probe` wrap the above.
