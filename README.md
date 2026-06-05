@@ -24,28 +24,34 @@ kernel 6.17, `asusd` 6.3.1. It auto-detects hardware, so other ASUS laptops
 
 ## Install & run
 
-You need a **Rust toolchain** (stable; 2021 edition). The repo ships a launcher
-script that builds the release binary on first use and runs it:
+The installer works on **any ASUS ROG/TUF laptop, any distro** — it builds a
+standalone binary, puts it on your `PATH` as `armoury`, and adds a desktop entry.
+It offers to install Rust (via rustup) if you don't have it, and checks for the
+`asusd` daemon the control features need.
 
 ```bash
 cd armoury-tui
-./armoury                 # launch the TUI (first run compiles --release; instant after)
-./armoury --probe         # print the discovered hardware map and exit
-./armoury --once          # print one text telemetry snapshot and exit
-./armoury -i 2            # 2-second refresh
-./armoury --log run.csv   # TUI + append one telemetry row per tick to a CSV
+./install.sh            # user install  → ~/.local/bin/armoury
+./install.sh --system   # system-wide   → /usr/local/bin/armoury  (uses sudo)
+./install.sh --uninstall
+
+armoury                 # launch the TUI
+armoury --probe         # print the discovered hardware map and exit
+armoury --once          # print one text telemetry snapshot and exit
+armoury -i 2            # 2-second refresh
+armoury --log run.csv   # TUI + append one telemetry row per tick to a CSV
 ```
 
-To make `armoury` a command you can run from anywhere, symlink it onto your
-`$PATH` (the launcher resolves symlinks, so it still finds the repo):
+`make install` / `make uninstall` / `make run` / `make probe` wrap the above.
 
-```bash
-ln -s "$PWD/armoury" ~/.local/bin/armoury      # if ~/.local/bin is on your PATH
-#   – or, to install the binary itself –
-cargo install --path rust                       # provides the `armoury-tui` command
-```
+For development, run from source without installing: `cd rust && cargo run --
+--probe`, `cargo test`, etc. The repo also ships an `./armoury` launcher that
+builds-and-runs from the working tree (handy while hacking).
 
-For development: `cd rust && cargo run -- --probe`, `cargo test`, etc.
+The tool **auto-detects hardware** and degrades gracefully — absent sensors or a
+missing daemon show "n/a" / disabled controls rather than failing — so it runs on
+AMD/Intel CPUs and NVIDIA/AMD GPUs across the ASUS ROG/TUF range, not just the
+reference machine.
 
 `--probe` / `--once` are headless — perfect for SSH/debugging, and they exercise
 the whole data layer with zero TUI involvement. (`--probe` output is
