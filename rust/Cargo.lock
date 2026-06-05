@@ -92,6 +92,7 @@ dependencies = [
  "procfs",
  "ratatui",
  "serde",
+ "serde_json",
  "sysinfo",
  "tokio",
  "toml",

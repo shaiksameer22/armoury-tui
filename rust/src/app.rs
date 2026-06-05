@@ -99,6 +99,7 @@ struct App {
     fan_alerted: bool,
     cfg: Config,
     applied_rule: Option<usize>,
+    notif: Option<zbus::blocking::Connection>, // session bus for desktop notifications
 
     cpu_hist: VecDeque<f64>,
     gpu_hist: VecDeque<f64>,
@@ -152,6 +153,7 @@ impl App {
             fan_alerted: false,
             cfg,
             applied_rule: None,
+            notif: zbus::blocking::Connection::session().ok(),
             cpu_hist: VecDeque::with_capacity(HIST),
             gpu_hist: VecDeque::with_capacity(HIST),
             cputemp_hist: VecDeque::with_capacity(HIST),
@@ -572,7 +574,7 @@ impl App {
         if let Some(t) = s.cpu.temp_c {
             let hot = t >= cpu_lim;
             if hot && !self.alert_cpu {
-                self.set_toast(format!("⚠ CPU hit {t:.0}°C (≥{cpu_lim:.0}°C)"), red());
+                self.alert(format!("⚠ CPU hit {t:.0}°C (≥{cpu_lim:.0}°C)"));
             }
             self.alert_cpu = hot;
         }
@@ -580,7 +582,7 @@ impl App {
             if let Some(t) = s.gpu.temp_c {
                 let hot = t >= gpu_lim;
                 if hot && !self.alert_gpu {
-                    self.set_toast(format!("⚠ GPU hit {t:.0}°C (≥{gpu_lim:.0}°C)"), red());
+                    self.alert(format!("⚠ GPU hit {t:.0}°C (≥{gpu_lim:.0}°C)"));
                 }
                 self.alert_gpu = hot;
             }
@@ -591,7 +593,7 @@ impl App {
             let discharging = b.rate_w.map(|r| r < 0.0).unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
             let low = b.percent.map(|p| p < batt_lim).unwrap_or(false) && discharging;
             if low && !self.batt_alerted {
-                self.set_toast(format!("⚠ battery low: {:.0}%", b.percent.unwrap_or(0.0)), red());
+                self.alert(format!("⚠ battery low: {:.0}%", b.percent.unwrap_or(0.0)));
             }
             self.batt_alerted = low;
         }
@@ -599,7 +601,7 @@ impl App {
         let hot = s.cpu.temp_c.map(|t| t >= fan_lim).unwrap_or(false);
         let stalled = hot && !s.fans.is_empty() && s.fans.iter().any(|f| f.rpm == 0);
         if stalled && !self.fan_alerted {
-            self.set_toast("⚠ fan reads 0 RPM while hot".into(), red());
+            self.alert("⚠ fan reads 0 RPM while hot".into());
         }
         self.fan_alerted = stalled;
     }
@@ -654,6 +656,29 @@ impl App {
 
     fn set_toast(&mut self, msg: String, color: ratatui::style::Color) {
         self.toast = Some((msg, Instant::now(), color));
+    }
+
+    /// Fire a desktop notification (org.freedesktop.Notifications), best-effort.
+    fn notify_desktop(&self, summary: &str, body: &str) {
+        let Some(conn) = &self.notif else { return };
+        if let Ok(p) = zbus::blocking::Proxy::new(
+            conn,
+            "org.freedesktop.Notifications",
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+        ) {
+            let hints: HashMap<&str, zbus::zvariant::Value> = HashMap::new();
+            let _: zbus::Result<u32> = p.call(
+                "Notify",
+                &("armoury-tui", 0u32, "utilities-terminal", summary, body, Vec::<&str>::new(), hints, 6000i32),
+            );
+        }
+    }
+
+    /// An alert: in-TUI toast + a system notification (seen even when unfocused).
+    fn alert(&mut self, msg: String) {
+        self.notify_desktop("armoury-tui", &msg);
+        self.set_toast(msg, red());
     }
 
     fn write_log(&mut self, s: &Snapshot) {

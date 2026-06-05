@@ -803,3 +803,68 @@ pub fn once() -> Result<()> {
     println!("top cpu     : {}", top.join(", "));
     Ok(())
 }
+
+/// `--json`: one snapshot as a single JSON line (status bars / scripting).
+pub fn json() -> Result<()> {
+    use serde::Serialize;
+    #[derive(Serialize)]
+    struct J {
+        profile: Option<String>,
+        cpu_load: f64,
+        cpu_temp: Option<f64>,
+        cpu_cores: usize,
+        gpu_present: bool,
+        gpu_util: Option<f64>,
+        gpu_temp: Option<f64>,
+        gpu_power_w: Option<f64>,
+        fans_rpm: Vec<(String, i64)>,
+        mem_pct: f64,
+        nvme_temp: Option<f64>,
+        battery_pct: Option<f64>,
+        battery_status: String,
+        battery_rate_w: Option<f64>,
+        battery_health_pct: Option<f64>,
+        charge_limit: Option<i64>,
+        kbd_brightness: Option<i64>,
+        net_down_bps: f64,
+        net_up_bps: f64,
+        uptime_s: f64,
+    }
+    let r1 = |x: f64| (x * 10.0).round() / 10.0;
+
+    let hw = crate::scanner::scan();
+    let mut tel = Telemetry::new(hw);
+    tel.snapshot();
+    std::thread::sleep(Duration::from_millis(400));
+    let s = tel.snapshot();
+    let (down, up) = s
+        .net
+        .iter()
+        .filter(|i| i.is_up && !i.is_virtual)
+        .fold((0.0, 0.0), |(d, u), i| (d + i.down_bps, u + i.up_bps));
+
+    let j = J {
+        profile: s.profile.clone(),
+        cpu_load: r1(s.cpu.overall),
+        cpu_temp: s.cpu.temp_c,
+        cpu_cores: s.cpu.cores,
+        gpu_present: s.gpu.present,
+        gpu_util: s.gpu.util,
+        gpu_temp: s.gpu.temp_c,
+        gpu_power_w: s.gpu.power_w,
+        fans_rpm: s.fans.iter().map(|f| (f.label.clone(), f.rpm)).collect(),
+        mem_pct: r1(s.mem.percent),
+        nvme_temp: s.storage.nvme_temp_c,
+        battery_pct: s.battery.percent,
+        battery_status: s.battery.status.clone(),
+        battery_rate_w: s.battery.rate_w,
+        battery_health_pct: s.battery.health_pct.map(r1),
+        charge_limit: s.battery.charge_limit,
+        kbd_brightness: s.kbd_brightness,
+        net_down_bps: down,
+        net_up_bps: up,
+        uptime_s: s.uptime_s,
+    };
+    println!("{}", serde_json::to_string(&j).unwrap_or_default());
+    Ok(())
+}

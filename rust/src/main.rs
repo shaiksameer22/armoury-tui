@@ -36,6 +36,10 @@ struct Cli {
     #[arg(long)]
     once: bool,
 
+    /// Print one telemetry snapshot as JSON and exit (for status bars/scripts).
+    #[arg(long)]
+    json: bool,
+
     /// UI refresh interval in seconds (default 1.0).
     #[arg(short = 'i', long, default_value_t = 1.0, value_name = "SEC")]
     interval: f64,
@@ -54,6 +58,9 @@ async fn main() -> Result<()> {
     }
     if cli.once {
         return telemetry::once();
+    }
+    if cli.json {
+        return telemetry::json();
     }
 
     // Clamp like the Python version so a tiny interval can't spin the loop.
