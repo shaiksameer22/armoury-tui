@@ -25,7 +25,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::control::{ControlResult, Controller, FanCurve};
-use crate::render::{self, AMBER, CYAN, DIM, MAGENTA, NEON_GREEN, RED, TEXT};
+use crate::render::{self, amber, cyan, dim, magenta, neon, red, text};
 use crate::scanner::HardwareMap;
 use crate::telemetry::{kill_process, ProcDetail, ProcInfo, Snapshot, Telemetry};
 
@@ -59,6 +59,7 @@ enum Act {
     ProcSelect(u32),
     Kill(bool),
     ConfirmKill(bool), // true = go ahead, false = cancel
+    CycleTheme,
 }
 
 struct App {
@@ -165,11 +166,11 @@ impl App {
     where
         F: FnOnce(&Controller) -> ControlResult + Send + 'static,
     {
-        self.set_toast(busy.into(), AMBER);
+        self.set_toast(busy.into(), amber());
         let ctl = Arc::clone(&self.control);
         match tokio::task::spawn_blocking(move || f(&ctl.lock().unwrap())).await {
-            Ok(r) => self.set_toast(r.message, if r.ok { NEON_GREEN } else { RED }),
-            Err(_) => self.set_toast("control task failed".into(), RED),
+            Ok(r) => self.set_toast(r.message, if r.ok { neon() } else { red() }),
+            Err(_) => self.set_toast("control task failed".into(), red()),
         }
         self.collect().await;
         self.reload_curves().await;
@@ -246,13 +247,13 @@ impl App {
     /// then enable the curve so the edit takes effect (cooler/quieter nudge).
     async fn curve_adjust(&mut self, delta: i32) {
         if self.curves.is_empty() {
-            self.set_toast("no curve loaded to adjust".into(), AMBER);
+            self.set_toast("no curve loaded to adjust".into(), amber());
             return;
         }
         let prof = self.curve_profile.clone();
         let curves = self.curves.clone();
         let verb = if delta > 0 { "cooler" } else { "quieter" };
-        self.set_toast(format!("{prof} curves {verb} ({delta:+}%)"), AMBER);
+        self.set_toast(format!("{prof} curves {verb} ({delta:+}%)"), amber());
         let ctl = Arc::clone(&self.control);
         let res = tokio::task::spawn_blocking(move || {
             let c = ctl.lock().unwrap();
@@ -272,8 +273,8 @@ impl App {
         })
         .await;
         match res {
-            Ok(r) => self.set_toast(r.message, if r.ok { NEON_GREEN } else { RED }),
-            Err(_) => self.set_toast("curve adjust failed".into(), RED),
+            Ok(r) => self.set_toast(r.message, if r.ok { neon() } else { red() }),
+            Err(_) => self.set_toast("curve adjust failed".into(), red()),
         }
         self.reload_curves().await;
     }
@@ -310,6 +311,7 @@ impl App {
             KeyCode::Char('c') if ctrl => return true,
             KeyCode::Char('q') | KeyCode::Esc => return true,
             KeyCode::Char('r') => self.collect().await,
+            KeyCode::Char('t') => self.cycle_theme(),
             KeyCode::Char(c @ '1'..='5') => self.tab = c as usize - '1' as usize,
             code => match self.tab {
                 1 => match code {
@@ -389,7 +391,13 @@ impl App {
                     self.confirm = None;
                 }
             }
+            Act::CycleTheme => self.cycle_theme(),
         }
+    }
+
+    fn cycle_theme(&mut self) {
+        let name = crate::theme::cycle();
+        self.set_toast(format!("theme → {name}"), neon());
     }
 
     fn zone(&self, rect: Rect, act: Act) {
@@ -450,7 +458,7 @@ impl App {
                 let name = self.proc_name(pid).unwrap_or_else(|| pid.to_string());
                 self.confirm = Some((pid, name, force));
             }
-            None => self.set_toast("no process selected".into(), AMBER),
+            None => self.set_toast("no process selected".into(), amber()),
         }
     }
 
@@ -459,7 +467,7 @@ impl App {
         let (ok, msg) = tokio::task::spawn_blocking(move || kill_process(pid, force))
             .await
             .unwrap_or((false, "kill task failed".into()));
-        self.set_toast(msg, if ok { NEON_GREEN } else { RED });
+        self.set_toast(msg, if ok { neon() } else { red() });
         if ok {
             self.selected_pid = None;
             self.detail = None;
@@ -500,7 +508,7 @@ impl App {
         if let Some(t) = s.cpu.temp_c {
             let hot = t >= CPU_TEMP_ALERT;
             if hot && !self.alert_cpu {
-                self.set_toast(format!("⚠ CPU hit {t:.0}°C (≥{CPU_TEMP_ALERT:.0}°C)"), RED);
+                self.set_toast(format!("⚠ CPU hit {t:.0}°C (≥{CPU_TEMP_ALERT:.0}°C)"), red());
             }
             self.alert_cpu = hot;
         }
@@ -508,7 +516,7 @@ impl App {
             if let Some(t) = s.gpu.temp_c {
                 let hot = t >= GPU_TEMP_ALERT;
                 if hot && !self.alert_gpu {
-                    self.set_toast(format!("⚠ GPU hit {t:.0}°C (≥{GPU_TEMP_ALERT:.0}°C)"), RED);
+                    self.set_toast(format!("⚠ GPU hit {t:.0}°C (≥{GPU_TEMP_ALERT:.0}°C)"), red());
                 }
                 self.alert_gpu = hot;
             }
@@ -635,7 +643,7 @@ fn draw(frame: &mut Frame, app: &App) {
     // Content.
     match app.latest.as_ref() {
         None => {
-            let p = Paragraph::new("collecting telemetry…").style(Style::new().fg(DIM)).block(Block::bordered());
+            let p = Paragraph::new("collecting telemetry…").style(Style::new().fg(dim())).block(Block::bordered());
             frame.render_widget(p, root[1]);
         }
         Some(s) => match app.tab {
@@ -654,14 +662,14 @@ fn draw(frame: &mut Frame, app: &App) {
             Line::styled(format!("  {msg}"), Style::new().fg(*color).add_modifier(Modifier::BOLD))
         }
         _ => Line::from(vec![
-            Span::styled("  click ", Style::new().fg(NEON_GREEN)),
-            Span::styled("or ", Style::new().fg(DIM)),
-            Span::styled("1-5 ", Style::new().fg(NEON_GREEN)),
-            Span::styled("tabs   ", Style::new().fg(DIM)),
-            Span::styled("r ", Style::new().fg(NEON_GREEN)),
-            Span::styled("refresh   ", Style::new().fg(DIM)),
-            Span::styled("q ", Style::new().fg(NEON_GREEN)),
-            Span::styled("quit", Style::new().fg(DIM)),
+            Span::styled("  click ", Style::new().fg(neon())),
+            Span::styled("or ", Style::new().fg(dim())),
+            Span::styled("1-5 ", Style::new().fg(neon())),
+            Span::styled("tabs   ", Style::new().fg(dim())),
+            Span::styled("r ", Style::new().fg(neon())),
+            Span::styled("refresh   ", Style::new().fg(dim())),
+            Span::styled("q ", Style::new().fg(neon())),
+            Span::styled("quit", Style::new().fg(dim())),
         ]),
     };
     frame.render_widget(Paragraph::new(footer), root[2]);
@@ -677,9 +685,9 @@ fn draw(frame: &mut Frame, app: &App) {
 /// Render a labelled chip and register its rect as a click zone.
 fn button(frame: &mut Frame, app: &App, rect: Rect, label: &str, active: bool, act: Act) {
     let style = if active {
-        Style::new().fg(Color::Black).bg(NEON_GREEN).add_modifier(Modifier::BOLD)
+        Style::new().fg(Color::Black).bg(neon()).add_modifier(Modifier::BOLD)
     } else {
-        Style::new().fg(TEXT).bg(Color::Rgb(0x1c, 0x24, 0x33))
+        Style::new().fg(text()).bg(Color::Rgb(0x1c, 0x24, 0x33))
     };
     frame.render_widget(Paragraph::new(format!(" {label} ")).style(style).alignment(Alignment::Center), rect);
     app.zone(rect, act);
@@ -703,7 +711,7 @@ fn place_buttons(frame: &mut Frame, app: &App, row: Rect, btns: Vec<(String, boo
 fn labeled_buttons(frame: &mut Frame, app: &App, row: Rect, label: &str, btns: Vec<(String, bool, Act)>) {
     let lw = 16u16.min(row.width);
     frame.render_widget(
-        Paragraph::new(Span::styled(label.to_string(), Style::new().fg(DIM))),
+        Paragraph::new(Span::styled(label.to_string(), Style::new().fg(dim()))),
         Rect { x: row.x, y: row.y, width: lw, height: 1 },
     );
     let brow = Rect { x: row.x + lw, y: row.y, width: row.width.saturating_sub(lw), height: 1 };
@@ -718,7 +726,7 @@ fn draw_confirm(frame: &mut Frame, app: &App, pid: u32, name: &str, force: bool)
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
         .title(" ⚠  KILL PROCESS ")
-        .border_style(Style::new().fg(RED).add_modifier(Modifier::BOLD));
+        .border_style(Style::new().fg(red()).add_modifier(Modifier::BOLD));
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
@@ -728,10 +736,10 @@ fn draw_confirm(frame: &mut Frame, app: &App, pid: u32, name: &str, force: bool)
         .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
     frame.render_widget(
-        Paragraph::new(Line::styled(format!("{name}  (PID {pid})"), Style::new().fg(CYAN))),
+        Paragraph::new(Line::styled(format!("{name}  (PID {pid})"), Style::new().fg(cyan()))),
         rows[0],
     );
-    frame.render_widget(Paragraph::new(Line::styled(format!("signal: {sig}"), Style::new().fg(DIM))), rows[1]);
+    frame.render_widget(Paragraph::new(Line::styled(format!("signal: {sig}"), Style::new().fg(dim()))), rows[1]);
     place_buttons(
         frame,
         app,
@@ -804,8 +812,8 @@ fn draw_power(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 /// Clickable profile / charge / fan-curve controls inside a CONTROLS panel.
 fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let block = Block::bordered()
-        .title(Span::styled(" CONTROLS ", Style::new().fg(NEON_GREEN).add_modifier(Modifier::BOLD)))
-        .border_style(Style::new().fg(NEON_GREEN));
+        .title(Span::styled(" CONTROLS ", Style::new().fg(neon()).add_modifier(Modifier::BOLD)))
+        .border_style(Style::new().fg(neon()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height < 4 {
@@ -849,9 +857,9 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     );
 
     let hint = if app.control_available {
-        Span::styled("click a control, or use keys  p [ ] s c v e d x", Style::new().fg(DIM))
+        Span::styled("click a control, or use keys  p [ ] s c v e d x", Style::new().fg(dim()))
     } else {
-        Span::styled("asusd unreachable — controls disabled", Style::new().fg(RED))
+        Span::styled("asusd unreachable — controls disabled", Style::new().fg(red()))
     };
     frame.render_widget(Paragraph::new(hint), r[3]);
 }
@@ -870,6 +878,7 @@ fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
             ("brightness −".into(), false, Act::Brightness(-1)),
             ("brightness +".into(), false, Act::Brightness(1)),
             ("cycle aura".into(), false, Act::AuraCycle),
+            ("🎨 theme".into(), false, Act::CycleTheme),
         ],
     );
 }
@@ -903,12 +912,12 @@ fn draw_proc_controls(frame: &mut Frame, app: &App, area: Rect) {
     place_buttons(frame, app, r[0], btns);
 
     let cursor = if app.filtering { "_" } else { "" };
-    let fcol = if app.filtering { CYAN } else { DIM };
+    let fcol = if app.filtering { cyan() } else { dim() };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("filter: ", Style::new().fg(DIM)),
+            Span::styled("filter: ", Style::new().fg(dim())),
             Span::styled(format!("{}{}", app.proc_filter, cursor), Style::new().fg(fcol)),
-            Span::styled("   ( / edit · ↑↓ select · k SIGTERM · K SIGKILL )", Style::new().fg(DIM)),
+            Span::styled("   ( / edit · ↑↓ select · k SIGTERM · K SIGKILL )", Style::new().fg(dim())),
         ])),
         r[1],
     );
@@ -916,8 +925,8 @@ fn draw_proc_controls(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_proc_table(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::bordered()
-        .title(Span::styled(" PROCESSES ", Style::new().fg(NEON_GREEN).add_modifier(Modifier::BOLD)))
-        .border_style(Style::new().fg(NEON_GREEN));
+        .title(Span::styled(" PROCESSES ", Style::new().fg(neon()).add_modifier(Modifier::BOLD)))
+        .border_style(Style::new().fg(neon()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height < 2 {
@@ -926,11 +935,11 @@ fn draw_proc_table(frame: &mut Frame, app: &App, area: Rect) {
     // Header.
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("{:<7}", "PID"), Style::new().fg(DIM)),
-            Span::styled(format!("{:<26}", "PROCESS"), Style::new().fg(DIM)),
-            Span::styled(format!("{:>7}", "CPU%"), Style::new().fg(DIM)),
-            Span::styled(format!("{:>9}", "MEM MB"), Style::new().fg(DIM)),
-            Span::styled(format!("{:>7}", "MEM%"), Style::new().fg(DIM)),
+            Span::styled(format!("{:<7}", "PID"), Style::new().fg(dim())),
+            Span::styled(format!("{:<26}", "PROCESS"), Style::new().fg(dim())),
+            Span::styled(format!("{:>7}", "CPU%"), Style::new().fg(dim())),
+            Span::styled(format!("{:>9}", "MEM MB"), Style::new().fg(dim())),
+            Span::styled(format!("{:>7}", "MEM%"), Style::new().fg(dim())),
         ])),
         Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
     );
@@ -943,10 +952,10 @@ fn draw_proc_table(frame: &mut Frame, app: &App, area: Rect) {
         let selected = Some(p.pid) == app.selected_pid;
         let name: String = p.name.chars().take(25).collect();
         let line = Line::from(vec![
-            Span::styled(format!("{:<7}", p.pid), Style::new().fg(DIM)),
-            Span::styled(format!("{:<26}", name), Style::new().fg(if selected { NEON_GREEN } else { TEXT })),
+            Span::styled(format!("{:<7}", p.pid), Style::new().fg(dim())),
+            Span::styled(format!("{:<26}", name), Style::new().fg(if selected { neon() } else { text() })),
             Span::styled(format!("{:>6.1} ", p.cpu), Style::new().fg(render::grade((p.cpu.min(100.0)) / 100.0, true))),
-            Span::styled(format!("{:>8.0} ", p.mem_mb), Style::new().fg(CYAN)),
+            Span::styled(format!("{:>8.0} ", p.mem_mb), Style::new().fg(cyan())),
             Span::styled(format!("{:>6.1} ", p.mem_pct), Style::new().fg(render::grade(p.mem_pct / 100.0, true))),
         ]);
         let base = if selected {
@@ -978,27 +987,29 @@ fn lighting_panel(app: &App, s: &Snapshot) -> Paragraph<'static> {
 
     let row = |k: &str, v: String, vc: ratatui::style::Color| {
         Line::from(vec![
-            Span::styled(format!("{:<20}", k), Style::new().fg(DIM)),
+            Span::styled(format!("{:<20}", k), Style::new().fg(dim())),
             Span::styled(v, Style::new().fg(vc)),
         ])
     };
     let mut lines = vec![
-        row("keyboard backlight", format!("{word} ({b})"), CYAN),
-        row("aura mode", mode.to_string(), MAGENTA),
-        row("supported modes", if supported.is_empty() { "n/a".into() } else { supported }, TEXT),
+        row("keyboard backlight", format!("{word} ({b})"), cyan()),
+        row("aura mode", mode.to_string(), magenta()),
+        row("supported modes", if supported.is_empty() { "n/a".into() } else { supported }, text()),
         row(
             "backend",
             if app.control_available { "asusd (xyz.ljones.Asusd)".into() } else { "unreachable".into() },
-            if app.control_available { NEON_GREEN } else { RED },
+            if app.control_available { neon() } else { red() },
         ),
+        row("theme", crate::theme::current().label.to_string(), neon()),
         Line::from(""),
     ];
     let key = |k: &'static str, d: &'static str| {
-        Line::from(vec![Span::styled(k, Style::new().fg(NEON_GREEN)), Span::styled(d, Style::new().fg(DIM))])
+        Line::from(vec![Span::styled(k, Style::new().fg(neon())), Span::styled(d, Style::new().fg(dim()))])
     };
     lines.push(key("+ / -   ", "brightness up / down"));
     lines.push(key("m       ", "cycle aura effect"));
-    render::panel(Text::from(lines), "LIGHTING", MAGENTA)
+    lines.push(key("t       ", "cycle colour theme"));
+    render::panel(Text::from(lines), "LIGHTING", magenta())
 }
 
 fn draw_network(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
@@ -1021,8 +1032,8 @@ fn draw_network(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 fn draw_placeholder(frame: &mut Frame, area: Rect) {
     let body = vec![
         Line::from(""),
-        Line::styled("  Processes tab arrives in Phase C.", Style::new().fg(AMBER)),
-        Line::styled("  Interactive table: sort / filter / select / kill, plus GPU compute apps.", Style::new().fg(DIM)),
+        Line::styled("  Processes tab arrives in Phase C.", Style::new().fg(amber())),
+        Line::styled("  Interactive table: sort / filter / select / kill, plus GPU compute apps.", Style::new().fg(dim())),
     ];
-    frame.render_widget(Paragraph::new(body).block(Block::bordered().border_style(Style::new().fg(CYAN))), area);
+    frame.render_widget(Paragraph::new(body).block(Block::bordered().border_style(Style::new().fg(cyan()))), area);
 }
