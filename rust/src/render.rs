@@ -468,6 +468,61 @@ pub fn fan_curve_panel(curves: &[crate::control::FanCurve], profile: &str, activ
     panel(Text::from(lines), &title, MAGENTA)
 }
 
+/// Detail card for the currently-selected process (Phase C).
+pub fn proc_detail_panel(d: Option<&crate::telemetry::ProcDetail>) -> Paragraph<'static> {
+    let Some(d) = d else {
+        return panel(Text::styled("select a process to inspect", Style::new().fg(DIM)), "PROCESS DETAIL", CYAN);
+    };
+    let kv2 = |k: &str, v: String, vc: Color| {
+        Line::from(vec![
+            Span::styled(format!("{:>9} ", k), Style::new().fg(DIM)),
+            Span::styled(v, Style::new().fg(vc)),
+        ])
+    };
+    // start_time → UTC HH:MM:SS without pulling in a date crate.
+    let sod = d.start_time % 86_400;
+    let started = format!("{:02}:{:02}:{:02} UTC", sod / 3600, (sod % 3600) / 60, sod % 60);
+    let status_col = if d.status == "run" || d.status == "sleep" || d.status == "running" || d.status == "sleeping" {
+        TEXT
+    } else {
+        AMBER
+    };
+    let lines = vec![
+        kv2("pid", d.pid.to_string(), NEON_GREEN),
+        kv2("name", d.name.clone(), CYAN),
+        kv2("status", d.status.clone(), status_col),
+        kv2("user", d.user.clone(), TEXT),
+        kv2("ppid", d.ppid.map(|p| p.to_string()).unwrap_or_else(|| "—".into()), TEXT),
+        kv2("cpu", format!("{:.1}%", d.cpu), grade((d.cpu.min(100.0)) / 100.0, true)),
+        kv2("memory", format!("{:.0} MB", d.mem_mb), CYAN),
+        kv2("started", started, TEXT),
+        kv2("cmd", d.cmd.chars().take(120).collect::<String>(), DIM),
+    ];
+    panel(Text::from(lines), "PROCESS DETAIL", CYAN)
+}
+
+pub fn gpu_proc_panel(s: &Snapshot) -> Paragraph<'static> {
+    if !s.gpu.present {
+        return panel(Text::styled("no GPU", Style::new().fg(DIM)), "GPU PROCESSES", MAGENTA);
+    }
+    if s.gpu_procs.is_empty() {
+        return panel(Text::styled("no GPU compute processes", Style::new().fg(DIM)), "GPU PROCESSES", MAGENTA);
+    }
+    let mut lines: Vec<Line> = vec![Line::from(vec![
+        Span::styled(format!("{:<7}", "pid"), Style::new().fg(DIM)),
+        Span::styled(format!("{:<28}", "process"), Style::new().fg(DIM)),
+        Span::styled(format!("{:>8}", "vram"), Style::new().fg(DIM)),
+    ])];
+    for p in &s.gpu_procs {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<7}", p.pid), Style::new().fg(DIM)),
+            Span::styled(format!("{:<28}", p.name.chars().take(27).collect::<String>()), Style::new().fg(TEXT)),
+            Span::styled(format!("{:>6.0}M", p.mem_mb), Style::new().fg(MAGENTA)),
+        ]));
+    }
+    panel(Text::from(lines), "GPU PROCESSES", MAGENTA)
+}
+
 pub fn net_table(s: &Snapshot) -> Paragraph<'static> {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(vec![

@@ -6,28 +6,33 @@
 //! redraws. Phase A renders the Dashboard, Power (read-only) and Network tabs;
 //! controls and the process table arrive in Phase B / C.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::io::Write as _;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
+};
 use futures_util::StreamExt;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Paragraph, Tabs};
+use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::control::{ControlResult, Controller, FanCurve};
 use crate::render::{self, AMBER, CYAN, DIM, MAGENTA, NEON_GREEN, RED, TEXT};
 use crate::scanner::HardwareMap;
-use crate::telemetry::{Snapshot, Telemetry};
+use crate::telemetry::{kill_process, ProcDetail, ProcInfo, Snapshot, Telemetry};
 
 const HIST: usize = 60; // samples kept for sparklines / trend graphs
 const CPU_TEMP_ALERT: f64 = 90.0;
 const GPU_TEMP_ALERT: f64 = 87.0;
+const PROC_ROWS: usize = 40; // max rows shown in the process table
 
 const TABS: [&str; 5] = [
     "⬢ Dashboard",
@@ -36,6 +41,25 @@ const TABS: [&str; 5] = [
     "⇅ Network",
     "☰ Processes",
 ];
+const PROC_SORTS: [&str; 4] = ["cpu", "mem", "pid", "name"];
+
+/// A click action bound to an on-screen region (filled in each `draw`).
+#[derive(Clone)]
+enum Act {
+    Tab(usize),
+    Profile(String),
+    Charge(i64),
+    Brightness(i64),
+    AuraCycle,
+    SwitchCurveProfile,
+    CurveAdjust(i32),
+    CurveEnable(bool),
+    CurveReset,
+    ProcSort(&'static str),
+    ProcSelect(u32),
+    Kill(bool),
+    ConfirmKill(bool), // true = go ahead, false = cancel
+}
 
 struct App {
     hw: HardwareMap,
@@ -50,9 +74,19 @@ struct App {
     log: Option<std::fs::File>,
     tab: usize,
     latest: Option<Snapshot>,
-    toast: Option<(String, Instant, ratatui::style::Color)>,
+    toast: Option<(String, Instant, Color)>,
     alert_cpu: bool,
     alert_gpu: bool,
+
+    // Mouse hit-regions, rebuilt every frame (draw is &self → interior mut).
+    zones: RefCell<Vec<(Rect, Act)>>,
+    // Process tab (Phase C).
+    proc_sort: &'static str,
+    proc_filter: String,
+    filtering: bool,
+    selected_pid: Option<u32>,
+    detail: Option<ProcDetail>,
+    confirm: Option<(u32, String, bool)>, // pid, name, force — kill dialog
 
     cpu_hist: VecDeque<f64>,
     gpu_hist: VecDeque<f64>,
@@ -88,6 +122,13 @@ impl App {
             toast: None,
             alert_cpu: false,
             alert_gpu: false,
+            zones: RefCell::new(Vec::new()),
+            proc_sort: "cpu",
+            proc_filter: String::new(),
+            filtering: false,
+            selected_pid: None,
+            detail: None,
+            confirm: None,
             cpu_hist: VecDeque::with_capacity(HIST),
             gpu_hist: VecDeque::with_capacity(HIST),
             cputemp_hist: VecDeque::with_capacity(HIST),
@@ -237,6 +278,195 @@ impl App {
         self.reload_curves().await;
     }
 
+    // -- input handling (keyboard + mouse) --------------------------------
+
+    /// Returns `true` if the app should quit.
+    async fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // Kill-confirm modal swallows all input.
+        if let Some((pid, _, force)) = self.confirm.clone() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => self.do_kill(pid, force).await,
+                _ => self.confirm = None,
+            }
+            return false;
+        }
+
+        // Filter text entry on the Processes tab.
+        if self.filtering {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => self.filtering = false,
+                KeyCode::Backspace => {
+                    self.proc_filter.pop();
+                }
+                KeyCode::Char(c) => self.proc_filter.push(c),
+                _ => {}
+            }
+            return false;
+        }
+
+        match key.code {
+            KeyCode::Char('c') if ctrl => return true,
+            KeyCode::Char('q') | KeyCode::Esc => return true,
+            KeyCode::Char('r') => self.collect().await,
+            KeyCode::Char(c @ '1'..='5') => self.tab = c as usize - '1' as usize,
+            code => match self.tab {
+                1 => match code {
+                    KeyCode::Char('p') => self.cycle_profile().await,
+                    KeyCode::Char(']') => self.adjust_charge(5).await,
+                    KeyCode::Char('[') => self.adjust_charge(-5).await,
+                    KeyCode::Char('s') => { self.switch_curve_profile(); self.reload_curves().await; }
+                    KeyCode::Char('c') => self.curve_adjust(5).await,
+                    KeyCode::Char('v') => self.curve_adjust(-5).await,
+                    KeyCode::Char('e') => self.curve_enable(true).await,
+                    KeyCode::Char('d') => self.curve_enable(false).await,
+                    KeyCode::Char('x') => self.curve_reset().await,
+                    _ => {}
+                },
+                2 => match code {
+                    KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_brightness(1).await,
+                    KeyCode::Char('-') | KeyCode::Char('_') => self.adjust_brightness(-1).await,
+                    KeyCode::Char('m') => self.cycle_aura().await,
+                    _ => {}
+                },
+                4 => match code {
+                    KeyCode::Char('/') => self.filtering = true,
+                    KeyCode::Char('c') => self.proc_sort = "cpu",
+                    KeyCode::Char('m') => self.proc_sort = "mem",
+                    KeyCode::Char('p') => self.proc_sort = "pid",
+                    KeyCode::Char('n') => self.proc_sort = "name",
+                    KeyCode::Down => self.move_selection(1).await,
+                    KeyCode::Up => self.move_selection(-1).await,
+                    KeyCode::Char('k') => self.request_kill(false),
+                    KeyCode::Char('K') => self.request_kill(true),
+                    _ => {}
+                },
+                _ => {}
+            },
+        }
+        false
+    }
+
+    async fn handle_mouse(&mut self, ev: crossterm::event::MouseEvent) {
+        if !matches!(ev.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+        let (col, row) = (ev.column, ev.row);
+        // Topmost zone wins → search newest-first.
+        let act = self
+            .zones
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(r, _)| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height)
+            .map(|(_, a)| a.clone());
+        if let Some(a) = act {
+            self.dispatch(a).await;
+        }
+    }
+
+    async fn dispatch(&mut self, act: Act) {
+        match act {
+            Act::Tab(i) => self.tab = i,
+            Act::Profile(name) => self.run_ctl(format!("→ {name} profile"), move |c| c.set_profile(&name)).await,
+            Act::Charge(d) => self.adjust_charge(d).await,
+            Act::Brightness(d) => self.adjust_brightness(d).await,
+            Act::AuraCycle => self.cycle_aura().await,
+            Act::SwitchCurveProfile => { self.switch_curve_profile(); self.reload_curves().await; }
+            Act::CurveAdjust(d) => self.curve_adjust(d).await,
+            Act::CurveEnable(b) => self.curve_enable(b).await,
+            Act::CurveReset => self.curve_reset().await,
+            Act::ProcSort(s) => self.proc_sort = s,
+            Act::ProcSelect(pid) => self.select_pid(pid).await,
+            Act::Kill(force) => self.request_kill(force),
+            Act::ConfirmKill(go) => {
+                if go {
+                    if let Some((pid, _, force)) = self.confirm.clone() {
+                        self.do_kill(pid, force).await;
+                    }
+                } else {
+                    self.confirm = None;
+                }
+            }
+        }
+    }
+
+    fn zone(&self, rect: Rect, act: Act) {
+        self.zones.borrow_mut().push((rect, act));
+    }
+
+    // -- process tab helpers ----------------------------------------------
+
+    /// Filtered + sorted process rows for the current view (top N).
+    fn proc_rows(&self) -> Vec<ProcInfo> {
+        let Some(s) = &self.latest else { return Vec::new() };
+        let f = self.proc_filter.to_lowercase();
+        let mut rows: Vec<ProcInfo> = s
+            .procs_all
+            .iter()
+            .filter(|p| f.is_empty() || p.name.to_lowercase().contains(&f) || p.pid.to_string() == f)
+            .cloned()
+            .collect();
+        match self.proc_sort {
+            "cpu" => rows.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal)),
+            "mem" => rows.sort_by(|a, b| b.mem_mb.partial_cmp(&a.mem_mb).unwrap_or(std::cmp::Ordering::Equal)),
+            "pid" => rows.sort_by_key(|p| p.pid),
+            _ => rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+        }
+        rows.truncate(PROC_ROWS);
+        rows
+    }
+
+    fn proc_name(&self, pid: u32) -> Option<String> {
+        self.latest.as_ref()?.procs_all.iter().find(|p| p.pid == pid).map(|p| p.name.clone())
+    }
+
+    async fn select_pid(&mut self, pid: u32) {
+        self.selected_pid = Some(pid);
+        let tel = Arc::clone(&self.tel);
+        if let Ok(d) = tokio::task::spawn_blocking(move || tel.lock().unwrap().process_detail(pid)).await {
+            self.detail = d;
+        }
+    }
+
+    async fn move_selection(&mut self, delta: i32) {
+        let rows = self.proc_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let cur = self.selected_pid.and_then(|pid| rows.iter().position(|p| p.pid == pid));
+        let ni = match cur {
+            Some(i) => (i as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize,
+            None => 0,
+        };
+        let pid = rows[ni].pid;
+        self.select_pid(pid).await;
+    }
+
+    fn request_kill(&mut self, force: bool) {
+        match self.selected_pid {
+            Some(pid) => {
+                let name = self.proc_name(pid).unwrap_or_else(|| pid.to_string());
+                self.confirm = Some((pid, name, force));
+            }
+            None => self.set_toast("no process selected".into(), AMBER),
+        }
+    }
+
+    async fn do_kill(&mut self, pid: u32, force: bool) {
+        self.confirm = None;
+        let (ok, msg) = tokio::task::spawn_blocking(move || kill_process(pid, force))
+            .await
+            .unwrap_or((false, "kill task failed".into()));
+        self.set_toast(msg, if ok { NEON_GREEN } else { RED });
+        if ok {
+            self.selected_pid = None;
+            self.detail = None;
+        }
+        self.collect().await;
+    }
+
     fn push_history(&mut self, s: &Snapshot) {
         push(&mut self.cpu_hist, s.cpu.overall);
         if let Some(t) = s.cpu.temp_c {
@@ -340,7 +570,9 @@ pub async fn run(refresh: f64, log_path: Option<String>) -> Result<()> {
     let mut app = App::new(hw, log_path);
 
     let mut terminal = ratatui::init();
+    let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let result = event_loop(&mut terminal, &mut app, refresh).await;
+    let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
@@ -368,36 +600,11 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App, refr
             maybe_event = events.next() => {
                 match maybe_event {
                     Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
-                        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-                        match key.code {
-                            KeyCode::Char('c') if ctrl => break,
-                            KeyCode::Char('q') | KeyCode::Esc => break,
-                            KeyCode::Char('r') => app.collect().await,
-                            KeyCode::Char(c @ '1'..='5') => app.tab = c as usize - '1' as usize,
-                            // Tab-specific control keys.
-                            code => match app.tab {
-                                1 => match code {
-                                    KeyCode::Char('p') => app.cycle_profile().await,
-                                    KeyCode::Char(']') => app.adjust_charge(5).await,
-                                    KeyCode::Char('[') => app.adjust_charge(-5).await,
-                                    KeyCode::Char('s') => { app.switch_curve_profile(); app.reload_curves().await; }
-                                    KeyCode::Char('c') => app.curve_adjust(5).await,
-                                    KeyCode::Char('v') => app.curve_adjust(-5).await,
-                                    KeyCode::Char('e') => app.curve_enable(true).await,
-                                    KeyCode::Char('d') => app.curve_enable(false).await,
-                                    KeyCode::Char('x') => app.curve_reset().await,
-                                    _ => {}
-                                },
-                                2 => match code {
-                                    KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_brightness(1).await,
-                                    KeyCode::Char('-') | KeyCode::Char('_') => app.adjust_brightness(-1).await,
-                                    KeyCode::Char('m') => app.cycle_aura().await,
-                                    _ => {}
-                                },
-                                _ => {}
-                            },
+                        if app.handle_key(key).await {
+                            break;
                         }
                     }
+                    Some(Ok(Event::Mouse(ev))) => app.handle_mouse(ev).await,
                     Some(Err(_)) | None => break,
                     _ => {}
                 }
@@ -410,21 +617,20 @@ async fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App, refr
 // -- drawing ----------------------------------------------------------------
 
 fn draw(frame: &mut Frame, app: &App) {
+    app.zones.borrow_mut().clear(); // rebuild click regions each frame
+
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
         .split(frame.area());
 
-    // Tab bar.
-    let titles: Vec<Line> = TABS
+    // Clickable tab bar.
+    let tabs: Vec<(String, bool, Act)> = TABS
         .iter()
         .enumerate()
-        .map(|(i, t)| Line::styled(format!(" {} {} ", i + 1, t), Style::new().fg(TEXT)))
+        .map(|(i, t)| (format!("{} {}", i + 1, t), app.tab == i, Act::Tab(i)))
         .collect();
-    let tabs = Tabs::new(titles)
-        .select(app.tab)
-        .highlight_style(Style::new().fg(NEON_GREEN).add_modifier(Modifier::BOLD | Modifier::REVERSED));
-    frame.render_widget(tabs, root[0]);
+    place_buttons(frame, app, root[0], tabs);
 
     // Content.
     match app.latest.as_ref() {
@@ -437,17 +643,20 @@ fn draw(frame: &mut Frame, app: &App) {
             1 => draw_power(frame, app, s, root[1]),
             2 => draw_lighting(frame, app, s, root[1]),
             3 => draw_network(frame, app, s, root[1]),
+            4 => draw_processes(frame, app, s, root[1]),
             _ => draw_placeholder(frame, root[1]),
         },
     }
 
-    // Footer: key hints, or a transient toast.
+    // Footer: a transient toast, else key hints.
     let footer = match &app.toast {
         Some((msg, born, color)) if born.elapsed() < Duration::from_secs(6) => {
             Line::styled(format!("  {msg}"), Style::new().fg(*color).add_modifier(Modifier::BOLD))
         }
         _ => Line::from(vec![
-            Span::styled("  1-5 ", Style::new().fg(NEON_GREEN)),
+            Span::styled("  click ", Style::new().fg(NEON_GREEN)),
+            Span::styled("or ", Style::new().fg(DIM)),
+            Span::styled("1-5 ", Style::new().fg(NEON_GREEN)),
             Span::styled("tabs   ", Style::new().fg(DIM)),
             Span::styled("r ", Style::new().fg(NEON_GREEN)),
             Span::styled("refresh   ", Style::new().fg(DIM)),
@@ -456,6 +665,82 @@ fn draw(frame: &mut Frame, app: &App) {
         ]),
     };
     frame.render_widget(Paragraph::new(footer), root[2]);
+
+    // Kill-confirm modal on top of everything.
+    if let Some((pid, name, force)) = &app.confirm {
+        draw_confirm(frame, app, *pid, name, *force);
+    }
+}
+
+// -- clickable widgets ------------------------------------------------------
+
+/// Render a labelled chip and register its rect as a click zone.
+fn button(frame: &mut Frame, app: &App, rect: Rect, label: &str, active: bool, act: Act) {
+    let style = if active {
+        Style::new().fg(Color::Black).bg(NEON_GREEN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(TEXT).bg(Color::Rgb(0x1c, 0x24, 0x33))
+    };
+    frame.render_widget(Paragraph::new(format!(" {label} ")).style(style).alignment(Alignment::Center), rect);
+    app.zone(rect, act);
+}
+
+/// Lay chips left-to-right across one row, each sized to its label.
+fn place_buttons(frame: &mut Frame, app: &App, row: Rect, btns: Vec<(String, bool, Act)>) {
+    let mut x = row.x;
+    let end = row.x + row.width;
+    for (label, active, act) in btns {
+        let w = label.chars().count() as u16 + 2;
+        if x + w > end {
+            break;
+        }
+        button(frame, app, Rect { x, y: row.y, width: w, height: 1 }, &label, active, act);
+        x += w + 1;
+    }
+}
+
+/// A dim label on the left of a row, then clickable chips to its right.
+fn labeled_buttons(frame: &mut Frame, app: &App, row: Rect, label: &str, btns: Vec<(String, bool, Act)>) {
+    let lw = 16u16.min(row.width);
+    frame.render_widget(
+        Paragraph::new(Span::styled(label.to_string(), Style::new().fg(DIM))),
+        Rect { x: row.x, y: row.y, width: lw, height: 1 },
+    );
+    let brow = Rect { x: row.x + lw, y: row.y, width: row.width.saturating_sub(lw), height: 1 };
+    place_buttons(frame, app, brow, btns);
+}
+
+fn draw_confirm(frame: &mut Frame, app: &App, pid: u32, name: &str, force: bool) {
+    let area = frame.area();
+    let w = 56u16.min(area.width);
+    let h = 8u16.min(area.height);
+    let rect = Rect { x: (area.width - w) / 2, y: (area.height - h) / 2, width: w, height: h };
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .title(" ⚠  KILL PROCESS ")
+        .border_style(Style::new().fg(RED).add_modifier(Modifier::BOLD));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let sig = if force { "SIGKILL — force, no cleanup" } else { "SIGTERM — graceful" };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+    frame.render_widget(
+        Paragraph::new(Line::styled(format!("{name}  (PID {pid})"), Style::new().fg(CYAN))),
+        rows[0],
+    );
+    frame.render_widget(Paragraph::new(Line::styled(format!("signal: {sig}"), Style::new().fg(DIM))), rows[1]);
+    place_buttons(
+        frame,
+        app,
+        rows[3],
+        vec![
+            ("Cancel (Esc)".into(), false, Act::ConfirmKill(false)),
+            ("Kill (Enter)".into(), true, Act::ConfirmKill(true)),
+        ],
+    );
 }
 
 fn fan_hist_map(app: &App) -> HashMap<String, Vec<f64>> {
@@ -509,60 +794,169 @@ fn draw_power(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         ])
         .split(area);
 
-    frame.render_widget(power_controls(app, s), rows[0]);
+    draw_power_controls(frame, app, s, rows[0]);
     let active = app.current_profile().as_deref() == Some(app.curve_profile.as_str());
     frame.render_widget(render::fan_curve_panel(&app.curves, &app.curve_profile, active), rows[1]);
     frame.render_widget(render::fan_graph_panel(s, &fans), rows[2]);
     frame.render_widget(render::battery_panel(s), rows[3]);
 }
 
-/// Profile selector + charge limit + the keyboard legend for the Power tab.
-fn power_controls(app: &App, s: &Snapshot) -> Paragraph<'static> {
-    let cur = s.profile.clone();
-    let mut pline = vec![Span::styled("profile  ", Style::new().fg(DIM))];
-    for name in &app.profiles {
-        let active = Some(name) == cur.as_ref();
-        let st = if active {
-            Style::new().fg(NEON_GREEN).add_modifier(Modifier::BOLD | Modifier::REVERSED)
-        } else {
-            Style::new().fg(TEXT)
-        };
-        pline.push(Span::styled(format!(" {name} "), st));
-        pline.push(Span::raw(" "));
+/// Clickable profile / charge / fan-curve controls inside a CONTROLS panel.
+fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
+    let block = Block::bordered()
+        .title(Span::styled(" CONTROLS ", Style::new().fg(NEON_GREEN).add_modifier(Modifier::BOLD)))
+        .border_style(Style::new().fg(NEON_GREEN));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height < 4 {
+        return;
     }
+    let r = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1); 5])
+        .split(inner);
+
+    let cur = s.profile.clone();
+    let profs: Vec<(String, bool, Act)> = app
+        .profiles
+        .iter()
+        .map(|n| (n.clone(), Some(n) == cur.as_ref(), Act::Profile(n.clone())))
+        .collect();
+    labeled_buttons(frame, app, r[0], "profile", profs);
 
     let limit = s.battery.charge_limit.map(|l| format!("{l}%")).unwrap_or_else(|| "—".into());
-    let ac = if s.battery.ac_online == Some(true) { "on AC" } else { "on battery" };
-    let cline = Line::from(vec![
-        Span::styled("charge   ", Style::new().fg(DIM)),
-        Span::styled(format!("limit {limit}"), Style::new().fg(MAGENTA)),
-        Span::styled(format!("   ({ac})"), Style::new().fg(DIM)),
-    ]);
+    labeled_buttons(
+        frame,
+        app,
+        r[1],
+        &format!("charge {limit}"),
+        vec![("−5%".into(), false, Act::Charge(-5)), ("+5%".into(), false, Act::Charge(5))],
+    );
 
-    let key = |k: &'static str, d: &'static str| {
-        vec![Span::styled(k, Style::new().fg(NEON_GREEN)), Span::styled(d, Style::new().fg(DIM))]
+    labeled_buttons(
+        frame,
+        app,
+        r[2],
+        &format!("curve {}", app.curve_profile),
+        vec![
+            ("switch".into(), false, Act::SwitchCurveProfile),
+            ("cooler".into(), false, Act::CurveAdjust(5)),
+            ("quieter".into(), false, Act::CurveAdjust(-5)),
+            ("enable".into(), false, Act::CurveEnable(true)),
+            ("disable".into(), false, Act::CurveEnable(false)),
+            ("default".into(), false, Act::CurveReset),
+        ],
+    );
+
+    let hint = if app.control_available {
+        Span::styled("click a control, or use keys  p [ ] s c v e d x", Style::new().fg(DIM))
+    } else {
+        Span::styled("asusd unreachable — controls disabled", Style::new().fg(RED))
     };
-    let mut l1 = key("p ", "profile   ");
-    l1.extend(key("[ ] ", "charge ∓5%   "));
-    l1.push(Span::styled("s ", Style::new().fg(NEON_GREEN)));
-    l1.push(Span::styled(format!("curve profile ({})", app.curve_profile), Style::new().fg(DIM)));
-    let mut l2 = key("c/v ", "cooler/quieter   ");
-    l2.extend(key("e/d ", "enable/disable   "));
-    l2.extend(key("x ", "default"));
-
-    let mut lines = vec![Line::from(pline), cline, Line::from(""), Line::from(l1), Line::from(l2)];
-    if !app.control_available {
-        lines.push(Line::styled("  asusd unreachable — controls disabled", Style::new().fg(RED)));
-    }
-    render::panel(Text::from(lines), "CONTROLS", NEON_GREEN)
+    frame.render_widget(Paragraph::new(hint), r[3]);
 }
 
 fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Min(0)])
+        .constraints([Constraint::Length(10), Constraint::Length(1), Constraint::Min(0)])
         .split(area);
     frame.render_widget(lighting_panel(app, s), rows[0]);
+    place_buttons(
+        frame,
+        app,
+        rows[1],
+        vec![
+            ("brightness −".into(), false, Act::Brightness(-1)),
+            ("brightness +".into(), false, Act::Brightness(1)),
+            ("cycle aura".into(), false, Act::AuraCycle),
+        ],
+    );
+}
+
+fn draw_processes(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(6), Constraint::Length(11)])
+        .split(area);
+    draw_proc_controls(frame, app, rows[0]);
+    draw_proc_table(frame, app, rows[1]);
+    let b = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(rows[2]);
+    frame.render_widget(render::proc_detail_panel(app.detail.as_ref()), b[0]);
+    frame.render_widget(render::gpu_proc_panel(s), b[1]);
+}
+
+fn draw_proc_controls(frame: &mut Frame, app: &App, area: Rect) {
+    let r = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+    let mut btns: Vec<(String, bool, Act)> = PROC_SORTS
+        .iter()
+        .map(|s| (s.to_uppercase(), app.proc_sort == *s, Act::ProcSort(*s)))
+        .collect();
+    btns.push(("⏻ kill".into(), false, Act::Kill(false)));
+    btns.push(("✖ force-kill".into(), false, Act::Kill(true)));
+    place_buttons(frame, app, r[0], btns);
+
+    let cursor = if app.filtering { "_" } else { "" };
+    let fcol = if app.filtering { CYAN } else { DIM };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("filter: ", Style::new().fg(DIM)),
+            Span::styled(format!("{}{}", app.proc_filter, cursor), Style::new().fg(fcol)),
+            Span::styled("   ( / edit · ↑↓ select · k SIGTERM · K SIGKILL )", Style::new().fg(DIM)),
+        ])),
+        r[1],
+    );
+}
+
+fn draw_proc_table(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::bordered()
+        .title(Span::styled(" PROCESSES ", Style::new().fg(NEON_GREEN).add_modifier(Modifier::BOLD)))
+        .border_style(Style::new().fg(NEON_GREEN));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height < 2 {
+        return;
+    }
+    // Header.
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!("{:<7}", "PID"), Style::new().fg(DIM)),
+            Span::styled(format!("{:<26}", "PROCESS"), Style::new().fg(DIM)),
+            Span::styled(format!("{:>7}", "CPU%"), Style::new().fg(DIM)),
+            Span::styled(format!("{:>9}", "MEM MB"), Style::new().fg(DIM)),
+            Span::styled(format!("{:>7}", "MEM%"), Style::new().fg(DIM)),
+        ])),
+        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+    );
+    // Rows.
+    let rows = app.proc_rows();
+    let visible = (inner.height - 1) as usize;
+    for (i, p) in rows.iter().take(visible).enumerate() {
+        let y = inner.y + 1 + i as u16;
+        let rrect = Rect { x: inner.x, y, width: inner.width, height: 1 };
+        let selected = Some(p.pid) == app.selected_pid;
+        let name: String = p.name.chars().take(25).collect();
+        let line = Line::from(vec![
+            Span::styled(format!("{:<7}", p.pid), Style::new().fg(DIM)),
+            Span::styled(format!("{:<26}", name), Style::new().fg(if selected { NEON_GREEN } else { TEXT })),
+            Span::styled(format!("{:>6.1} ", p.cpu), Style::new().fg(render::grade((p.cpu.min(100.0)) / 100.0, true))),
+            Span::styled(format!("{:>8.0} ", p.mem_mb), Style::new().fg(CYAN)),
+            Span::styled(format!("{:>6.1} ", p.mem_pct), Style::new().fg(render::grade(p.mem_pct / 100.0, true))),
+        ]);
+        let base = if selected {
+            Style::new().bg(Color::Rgb(0x10, 0x2a, 0x22))
+        } else {
+            Style::default()
+        };
+        frame.render_widget(Paragraph::new(line).style(base), rrect);
+        app.zone(rrect, Act::ProcSelect(p.pid));
+    }
 }
 
 fn lighting_panel(app: &App, s: &Snapshot) -> Paragraph<'static> {

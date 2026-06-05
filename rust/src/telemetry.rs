@@ -126,6 +126,40 @@ pub struct GpuProc {
     pub mem_mb: f64,
 }
 
+/// Detail card for the selected process (Phase C).
+#[derive(Debug, Clone)]
+pub struct ProcDetail {
+    pub pid: u32,
+    pub name: String,
+    pub status: String,
+    pub user: String,
+    pub ppid: Option<u32>,
+    pub cpu: f64,
+    pub mem_mb: f64,
+    pub start_time: u64,
+    pub cmd: String,
+}
+
+/// Send SIGTERM (or SIGKILL if `force`) to a process, with guard rails.
+/// Refuses PID 1 and this process / its parent. Never panics.
+pub fn kill_process(pid: u32, force: bool) -> (bool, String) {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    let own = std::process::id();
+    let parent = nix::unistd::getppid().as_raw() as u32;
+    if pid == 1 || pid == own || pid == parent {
+        return (false, format!("refusing to kill critical/own process {pid}"));
+    }
+    let sig = if force { Signal::SIGKILL } else { Signal::SIGTERM };
+    match kill(Pid::from_raw(pid as i32), sig) {
+        Ok(()) => (true, format!("sent {sig:?} → {pid}")),
+        Err(nix::errno::Errno::ESRCH) => (false, format!("process {pid} is already gone")),
+        Err(nix::errno::Errno::EPERM) => (false, format!("permission denied for {pid} — likely root-owned")),
+        Err(e) => (false, format!("failed to signal {pid}: {e}")),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     pub ts: f64,
@@ -472,6 +506,36 @@ impl Telemetry {
         by_mem.truncate(7);
         rows.shrink_to_fit();
         (by_cpu, by_mem, rows)
+    }
+
+    /// Best-effort detail bundle for one process (each field guarded).
+    pub fn process_detail(&mut self, pid: u32) -> Option<ProcDetail> {
+        let spid = sysinfo::Pid::from_u32(pid);
+        self.sys.refresh_processes(ProcessesToUpdate::Some(&[spid]), false);
+        let users = sysinfo::Users::new_with_refreshed_list();
+        let p = self.sys.process(spid)?;
+        let user = p
+            .user_id()
+            .and_then(|uid| users.get_user_by_id(uid))
+            .map(|u| u.name().to_string())
+            .unwrap_or_else(|| "—".into());
+        let cmd = p
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        Some(ProcDetail {
+            pid,
+            name: p.name().to_string_lossy().to_string(),
+            status: format!("{:?}", p.status()).to_lowercase(),
+            user,
+            ppid: p.parent().map(|pp| pp.as_u32()),
+            cpu: p.cpu_usage() as f64,
+            mem_mb: p.memory() as f64 / 1_048_576.0,
+            start_time: p.start_time(),
+            cmd: if cmd.is_empty() { "—".into() } else { cmd },
+        })
     }
 
     fn gpu_processes(&self) -> Vec<GpuProc> {
