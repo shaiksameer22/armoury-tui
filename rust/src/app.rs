@@ -50,6 +50,9 @@ enum Act {
     Charge(i64),
     Brightness(i64),
     AuraCycle,
+    AuraColor((u8, u8, u8)),
+    AuraSpeed,
+    AuraDir,
     SwitchCurveProfile,
     CurveAdjust(i32),
     CurveEnable(bool),
@@ -75,6 +78,10 @@ struct App {
     curves: Vec<FanCurve>,
     aura_mode: Option<u32>,
     aura_supported: Vec<u32>,
+    aura_c1: (u8, u8, u8),
+    aura_c2: (u8, u8, u8),
+    aura_speed: String,
+    aura_dir: String,
     auto: Option<(u32, u32, bool, bool)>, // profile on_ac/on_bat, auto-switch ac/bat
     epps: Option<(u32, u32, u32)>,        // balanced/performance/quiet EPP
     log: Option<std::fs::File>,
@@ -132,6 +139,10 @@ impl App {
             curves: Vec::new(),
             aura_mode: None,
             aura_supported: Vec::new(),
+            aura_c1: (0xff, 0x2e, 0x88),
+            aura_c2: (0x36, 0xf9, 0xf6),
+            aura_speed: "Med".into(),
+            aura_dir: "Right".into(),
             auto: None,
             epps: None,
             log,
@@ -256,6 +267,14 @@ impl App {
 
     async fn cycle_aura(&mut self) {
         self.run_ctl("→ aura mode", |c| c.cycle_aura_mode()).await;
+    }
+
+    /// Apply the current effect with the editor's colour/speed/direction.
+    async fn apply_aura(&mut self) {
+        let mode = self.aura_mode.unwrap_or(0);
+        let (c1, c2) = (self.aura_c1, self.aura_c2);
+        let (sp, dr) = (self.aura_speed.clone(), self.aura_dir.clone());
+        self.run_ctl("aura…", move |c| c.set_aura_full(mode, c1, c2, &sp, &dr)).await;
     }
 
     async fn curve_enable(&mut self, enabled: bool) {
@@ -424,6 +443,26 @@ impl App {
             Act::Charge(d) => self.adjust_charge(d).await,
             Act::Brightness(d) => self.adjust_brightness(d).await,
             Act::AuraCycle => self.cycle_aura().await,
+            Act::AuraColor(rgb) => { self.aura_c1 = rgb; self.apply_aura().await; }
+            Act::AuraSpeed => {
+                self.aura_speed = match self.aura_speed.as_str() {
+                    "Low" => "Med",
+                    "Med" => "High",
+                    _ => "Low",
+                }
+                .into();
+                self.apply_aura().await;
+            }
+            Act::AuraDir => {
+                self.aura_dir = match self.aura_dir.as_str() {
+                    "Up" => "Down",
+                    "Down" => "Left",
+                    "Left" => "Right",
+                    _ => "Up",
+                }
+                .into();
+                self.apply_aura().await;
+            }
             Act::SwitchCurveProfile => { self.switch_curve_profile(); self.reload_curves().await; }
             Act::CurveAdjust(d) => self.curve_adjust(d).await,
             Act::CurveEnable(b) => self.curve_enable(b).await,
@@ -1107,7 +1146,13 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
         .split(area);
     frame.render_widget(lighting_panel(app, s), rows[0]);
     place_buttons(
@@ -1121,6 +1166,54 @@ fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
             ("🎨 theme".into(), false, Act::CycleTheme),
         ],
     );
+    draw_swatches(frame, app, rows[2]);
+    place_buttons(
+        frame,
+        app,
+        rows[3],
+        vec![
+            (format!("speed: {}", app.aura_speed), false, Act::AuraSpeed),
+            (format!("direction: {}", app.aura_dir), false, Act::AuraDir),
+        ],
+    );
+}
+
+/// Neon colour palette for the Aura editor (applies to static/breathe/highlight).
+const SWATCHES: [(u8, u8, u8); 8] = [
+    (0xff, 0x2e, 0x88),
+    (0x36, 0xf9, 0xf6),
+    (0x00, 0xff, 0x9c),
+    (0xf3, 0xd0, 0x00),
+    (0xff, 0x33, 0x55),
+    (0x5a, 0xc8, 0xfa),
+    (0x9d, 0x4e, 0xdd),
+    (0xff, 0xff, 0xff),
+];
+
+fn draw_swatches(frame: &mut Frame, app: &App, row: Rect) {
+    frame.render_widget(
+        Paragraph::new(Span::styled("colour ", Style::new().fg(dim()))),
+        Rect { x: row.x, y: row.y, width: 8.min(row.width), height: 1 },
+    );
+    let mut x = row.x + 8;
+    let end = row.x + row.width;
+    for rgb in SWATCHES {
+        let w = 5u16;
+        if x + w > end {
+            break;
+        }
+        let r = Rect { x, y: row.y, width: w, height: 1 };
+        let active = app.aura_c1 == rgb;
+        let bg = Color::Rgb(rgb.0, rgb.1, rgb.2);
+        frame.render_widget(
+            Paragraph::new(Span::styled(if active { " ◉ " } else { "   " }, Style::new().fg(Color::Black).bg(bg)))
+                .alignment(Alignment::Center)
+                .style(Style::new().bg(bg)),
+            r,
+        );
+        app.zone(r, Act::AuraColor(rgb));
+        x += w + 1;
+    }
 }
 
 fn draw_processes(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {

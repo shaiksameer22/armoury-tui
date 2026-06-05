@@ -252,6 +252,20 @@ impl Controller {
         }
     }
 
+    /// Apply a full LED effect: mode + primary/secondary colour + speed + direction
+    /// via the `LedModeData` tuple `(mode, zone, rgb, rgb, speed, dir)`.
+    pub fn set_aura_full(&self, mode: u32, c1: (u8, u8, u8), c2: (u8, u8, u8), speed: &str, dir: &str) -> ControlResult {
+        let bus = match self.bus() {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let data = (mode, 0u32, c1, c2, speed.to_string(), dir.to_string());
+        match bus.aura().and_then(|p| p.set_property("LedModeData", data).map_err(Into::into)) {
+            Ok(()) => ControlResult::ok(format!("aura {} applied", aura_mode_name(mode))),
+            Err(e) => ControlResult::err(first_line(&e.to_string())),
+        }
+    }
+
     /// Advance to the next asusd-supported LED mode (read current, set next).
     pub fn cycle_aura_mode(&self) -> ControlResult {
         if self.bus().is_err() {
