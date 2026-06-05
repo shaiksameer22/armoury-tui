@@ -868,3 +868,75 @@ pub fn json() -> Result<()> {
     println!("{}", serde_json::to_string(&j).unwrap_or_default());
     Ok(())
 }
+
+/// `--replay`: summarise a `--log` CSV (per-metric min/avg/max + a sparkline).
+pub fn replay(path: &str) -> Result<()> {
+    let text = std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read {path}: {e}"))?;
+    let mut lines = text.lines();
+    let cols: Vec<&str> = lines.next().unwrap_or_default().split(',').collect();
+    let idx = |name: &str| cols.iter().position(|c| *c == name);
+    let want: [(&str, &str, &str); 6] = [
+        ("cpu_pct", "cpu load", "%"),
+        ("cpu_temp", "cpu temp", "°C"),
+        ("gpu_temp", "gpu temp", "°C"),
+        ("gpu_power_w", "gpu power", "W "),
+        ("mem_pct", "memory", "% "),
+        ("batt_pct", "battery", "% "),
+    ];
+    let ts_i = idx("ts");
+    let mut series: Vec<Vec<f64>> = vec![Vec::new(); want.len()];
+    let mut tss: Vec<f64> = Vec::new();
+    let mut rows = 0usize;
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split(',').collect();
+        let get = |i: Option<usize>| i.and_then(|i| f.get(i)).and_then(|v| v.parse::<f64>().ok());
+        if let Some(t) = get(ts_i) {
+            tss.push(t);
+        }
+        for (k, (name, _, _)) in want.iter().enumerate() {
+            if let Some(v) = get(idx(name)) {
+                series[k].push(v);
+            }
+        }
+        rows += 1;
+    }
+    if rows == 0 {
+        println!("no data rows in {path}");
+        return Ok(());
+    }
+    let dur = match (tss.first(), tss.last()) {
+        (Some(a), Some(b)) => b - a,
+        _ => 0.0,
+    };
+    println!("replay {path}: {rows} samples over {dur:.0}s");
+    for (k, (_, label, unit)) in want.iter().enumerate() {
+        let v = &series[k];
+        if v.is_empty() {
+            continue;
+        }
+        let mn = v.iter().cloned().fold(f64::INFINITY, f64::min);
+        let mx = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let avg = v.iter().sum::<f64>() / v.len() as f64;
+        println!("  {label:<9} min {mn:>5.0} avg {avg:>5.0} max {mx:>5.0} {unit}  {}", spark(v));
+    }
+    Ok(())
+}
+
+fn spark(v: &[f64]) -> String {
+    const B: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
+    let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let span = if (hi - lo).abs() < f64::EPSILON { 1.0 } else { hi - lo };
+    let step = (v.len() as f64 / 50.0).max(1.0);
+    let mut out = String::new();
+    let mut i = 0.0;
+    while (i as usize) < v.len() {
+        let idx = (((v[i as usize] - lo) / span) * 7.0).round() as usize;
+        out.push(B[idx.min(7)]);
+        i += step;
+    }
+    out
+}

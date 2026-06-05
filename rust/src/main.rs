@@ -47,6 +47,10 @@ struct Cli {
     /// Append a telemetry CSV row each tick to this file.
     #[arg(long, value_name = "CSV")]
     log: Option<String>,
+
+    /// Summarise a --log CSV (stats + sparklines) and exit.
+    #[arg(long, value_name = "CSV")]
+    replay: Option<String>,
 }
 
 #[tokio::main]
@@ -61,6 +65,9 @@ async fn main() -> Result<()> {
     }
     if cli.json {
         return telemetry::json();
+    }
+    if let Some(csv) = cli.replay {
+        return telemetry::replay(&csv);
     }
 
     // Clamp like the Python version so a tiny interval can't spin the loop.
