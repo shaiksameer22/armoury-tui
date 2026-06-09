@@ -110,3 +110,97 @@ pub fn set_by_label(label: &str) {
         IDX.store(i, Ordering::Relaxed);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reset theme to Cyberpunk before each test to avoid cross-test interference.
+    fn reset() {
+        set_by_label("Cyberpunk");
+    }
+
+    #[test]
+    fn test_current_default_is_cyberpunk() {
+        reset();
+        assert_eq!(current().label, "Cyberpunk");
+    }
+
+    #[test]
+    fn test_current_label_matches_current() {
+        reset();
+        assert_eq!(current_label(), current().label);
+    }
+
+    #[test]
+    fn test_cycle_advances_through_all_themes() {
+        reset();
+        // Starting at Cyberpunk (index 0), cycling should go: 1=Synthwave, 2=Matrix, 3=Amber CRT, 4=Ice
+        assert_eq!(cycle(), "Synthwave");
+        assert_eq!(cycle(), "Matrix");
+        assert_eq!(cycle(), "Amber CRT");
+        assert_eq!(cycle(), "Ice");
+    }
+
+    #[test]
+    fn test_cycle_wraps_around() {
+        reset();
+        // Cycle through all 5 themes (4 cycles from index 0 → index 4)
+        for _ in 0..4 {
+            cycle();
+        }
+        assert_eq!(current().label, "Ice");
+        // One more cycle should wrap back to Cyberpunk
+        assert_eq!(cycle(), "Cyberpunk");
+        assert_eq!(current().label, "Cyberpunk");
+    }
+
+    #[test]
+    fn test_set_by_label_exact() {
+        reset();
+        set_by_label("Matrix");
+        assert_eq!(current().label, "Matrix");
+    }
+
+    #[test]
+    fn test_set_by_label_case_insensitive() {
+        reset();
+        set_by_label("MATRIX");
+        assert_eq!(current().label, "Matrix");
+
+        set_by_label("matrix");
+        assert_eq!(current().label, "Matrix");
+
+        set_by_label("MaTrIx");
+        assert_eq!(current().label, "Matrix");
+    }
+
+    #[test]
+    fn test_set_by_label_nonexistent_is_noop() {
+        reset();
+        set_by_label("nonexistent");
+        // Should still be Cyberpunk
+        assert_eq!(current().label, "Cyberpunk");
+    }
+
+    #[test]
+    fn test_set_by_label_all_themes() {
+        for theme in &THEMES {
+            set_by_label(theme.label);
+            assert_eq!(current().label, theme.label);
+        }
+        // Reset for other tests
+        reset();
+    }
+
+    #[test]
+    fn test_themes_count() {
+        assert_eq!(THEMES.len(), 5);
+    }
+
+    #[test]
+    fn test_theme_labels() {
+        let labels: Vec<&str> = THEMES.iter().map(|t| t.label).collect();
+        assert_eq!(labels, vec!["Cyberpunk", "Synthwave", "Matrix", "Amber CRT", "Ice"]);
+    }
+}

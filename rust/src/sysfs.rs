@@ -98,4 +98,115 @@ mod tests {
         assert_eq!(parse_int_tolerant("garbage"), None);
         assert_eq!(parse_int_tolerant(""), None);
     }
+
+    // -- read_text tests ---------------------------------------------------
+
+    #[test]
+    fn test_read_text_trims_whitespace() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_rt_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("trimme.txt");
+        std::fs::write(&file, "  hello  \n").unwrap();
+        assert_eq!(read_text(&file), Some("hello".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_text_nonexistent() {
+        assert_eq!(read_text("/tmp/this_path_does_not_exist_armoury_123456"), None);
+    }
+
+    // -- read_int tests ----------------------------------------------------
+
+    #[test]
+    fn test_read_int_normal() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_ri_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("int_val.txt");
+        std::fs::write(&file, "42000").unwrap();
+        assert_eq!(read_int(&file), Some(42000));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_int_empty() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_rie_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("empty.txt");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(read_int(&file), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- read_milli tests --------------------------------------------------
+
+    #[test]
+    fn test_read_milli_conversion() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_rm_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("milli.txt");
+        std::fs::write(&file, "61000").unwrap();
+        assert_eq!(read_milli(&file), Some(61.0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- read_float tests --------------------------------------------------
+
+    #[test]
+    fn test_read_float_with_units() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_rf_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("float.txt");
+        std::fs::write(&file, "3.14 units").unwrap();
+        let v = read_float(&file);
+        assert!(v.is_some());
+        assert!((v.unwrap() - 3.14).abs() < 1e-6);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- glob_in tests -----------------------------------------------------
+
+    #[test]
+    fn test_glob_in_matches_prefix_suffix() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_gl_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Create files: temp1_input, temp2_input, fan1_input
+        std::fs::write(dir.join("temp1_input"), "1").unwrap();
+        std::fs::write(dir.join("temp2_input"), "2").unwrap();
+        std::fs::write(dir.join("fan1_input"), "3").unwrap();
+
+        let results = glob_in(&dir, "temp", "_input");
+        assert_eq!(results.len(), 2);
+        // Verify they are sorted
+        let names: Vec<String> = results
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, vec!["temp1_input", "temp2_input"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_glob_in_no_matches() {
+        let dir = std::env::temp_dir().join(format!("sysfs_test_gln_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fan1_input"), "1").unwrap();
+        let results = glob_in(&dir, "temp", "_input");
+        assert!(results.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- which tests -------------------------------------------------------
+
+    #[test]
+    fn test_which_cargo() {
+        // cargo is always available in a Rust test environment
+        assert!(which("cargo"));
+    }
+
+    #[test]
+    fn test_which_nonexistent() {
+        assert!(!which("nonexistent_binary_12345"));
+    }
 }

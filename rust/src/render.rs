@@ -661,4 +661,73 @@ mod tests {
         let rows = area_chart(&[1.0, 2.0, 3.0], 3.0, 5, None, true);
         assert_eq!(rows.len(), 5);
     }
+
+    // -- extended human_bytes tests -----------------------------------------
+
+    #[test]
+    fn test_human_bytes_zero() {
+        assert_eq!(human_bytes(0.0), "0B");
+    }
+
+    #[test]
+    fn test_human_bytes_below_1k() {
+        assert_eq!(human_bytes(1023.0), "1023B");
+    }
+
+    #[test]
+    fn test_human_bytes_exactly_1k() {
+        assert_eq!(human_bytes(1024.0), "1.0K");
+    }
+
+    #[test]
+    fn test_human_bytes_1m() {
+        assert_eq!(human_bytes(1_048_576.0), "1.0M");
+    }
+
+    #[test]
+    fn test_human_bytes_1g() {
+        assert_eq!(human_bytes(1_073_741_824.0), "1.0G");
+    }
+
+    #[test]
+    fn test_human_bytes_negative() {
+        // Negative values: abs() < 1024 at byte level, so formats as bytes
+        assert_eq!(human_bytes(-500.0), "-500B");
+    }
+
+    #[test]
+    fn test_human_bytes_negative_large() {
+        // -1536 bytes → abs() >= 1024, so divides: -1.5K
+        assert_eq!(human_bytes(-1536.0), "-1.5K");
+    }
+
+    // -- extended fmt_rate tests -------------------------------------------
+
+    #[test]
+    fn test_fmt_rate_zero() {
+        assert_eq!(fmt_rate(0.0).trim(), "0.0 B/s");
+    }
+
+    #[test]
+    fn test_fmt_rate_500() {
+        assert_eq!(fmt_rate(500.0).trim(), "500.0 B/s");
+    }
+
+    #[test]
+    fn test_fmt_rate_1500() {
+        // 1500 / 1024 ≈ 1.46 KB/s
+        assert_eq!(fmt_rate(1500.0).trim(), "1.5 KB/s");
+    }
+
+    #[test]
+    fn test_fmt_rate_1_5m() {
+        // 1_500_000 / 1024 / 1024 ≈ 1.43 MB/s
+        assert_eq!(fmt_rate(1_500_000.0).trim(), "1.4 MB/s");
+    }
+
+    #[test]
+    fn test_fmt_rate_1_5g() {
+        // 1_500_000_000 / 1024^3 ≈ 1.40 GB/s
+        assert_eq!(fmt_rate(1_500_000_000.0).trim(), "1.4 GB/s");
+    }
 }

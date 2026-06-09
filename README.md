@@ -202,18 +202,27 @@ Lighting tab) to cycle; the whole UI re-colours live.
 ```
 armoury-tui/
 ├── armoury                 # launcher: build --release + run, passthrough args
+├── install.sh              # cross-distro installer (binary + desktop entry)
+├── Makefile                # convenience targets (build/run/test/fmt/probe)
+├── CHANGELOG.md            # keepachangelog-format history
+├── CONTRIBUTING.md         # build, test, and PR guide
+├── LICENSE                 # MIT
+├── .editorconfig           # consistent formatting across editors
+├── .github/                # CI workflow + issue/PR templates
 └── rust/
     ├── Cargo.toml
+    ├── tests/              # integration tests (CLI modes)
     └── src/
         ├── sysfs.rs        # total (never-panicking) sysfs/procfs read primitives
         ├── scanner.rs      # dynamic hardware discovery -> HardwareMap
         ├── telemetry.rs    # live collectors (sysinfo/sysfs/NVML/UPower) -> Snapshot
         ├── control.rs      # safe state controller over D-Bus to asusd
         ├── dbus.rs         # zbus proxies for asusd + UPower
+        ├── config.rs       # user config (~/.config/armoury-tui/config.toml)
         ├── render.rs       # ratatui renderables: meters, sparklines, area charts, panels
         ├── app.rs          # the reactive render loop, tabs, input (keyboard + mouse)
         ├── theme.rs        # colour themes
-        └── main.rs         # CLI: TUI / --probe / --once / -i / --log
+        └── main.rs         # CLI: TUI / --probe / --once / --json / --replay
 ```
 
 The dependency direction is strictly one-way (`sysfs → scanner → telemetry /
@@ -254,9 +263,18 @@ Default nudges cover the common cases).
 
 ---
 
-## Python original
+## Contributing
 
-The repository also contains the original Python implementation under
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, testing, code
+style, and the PR workflow. Bug reports, hardware compatibility reports (`armoury
+--probe` output), and feature requests are all welcome — GitHub issue templates
+are provided.
+
+---
+
+## Python original (legacy)
+
+The repository also contains the **original Python implementation** under
 `armoury_tui/` (Textual + psutil), which this Rust version was ported from. It
-still runs (`python3 -m armoury_tui`) but the Rust build is the one `armoury`
-launches and where development continues.
+still runs (`python3 -m armoury_tui`) but is **no longer maintained** — the Rust
+build is the one `armoury` launches and where all development continues.

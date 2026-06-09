@@ -25,6 +25,7 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(
     name = "armoury-tui",
+    version,
     about = "ASUS Armoury-Crate-style monitor/control TUI for Linux (Rust)."
 )]
 struct Cli {

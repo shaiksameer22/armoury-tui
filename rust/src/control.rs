@@ -422,4 +422,79 @@ mod tests {
         let c = FanCurve { profile: "Performance".into(), fan: "CPU".into(), points: vec![(30, 0), (60, 128), (90, 255)], enabled: true };
         assert_eq!(c.pwm_pcts(), vec![0, 50, 100]);
     }
+
+    // -- aura_mode_name tests ---------------------------------------------
+
+    #[test]
+    fn test_aura_mode_name_static() {
+        assert_eq!(aura_mode_name(0), "static");
+    }
+
+    #[test]
+    fn test_aura_mode_name_breathe() {
+        assert_eq!(aura_mode_name(1), "breathe");
+    }
+
+    #[test]
+    fn test_aura_mode_name_pulse() {
+        assert_eq!(aura_mode_name(2), "pulse");
+    }
+
+    #[test]
+    fn test_aura_mode_name_rainbow() {
+        assert_eq!(aura_mode_name(3), "rainbow");
+    }
+
+    #[test]
+    fn test_aura_mode_name_highlight() {
+        assert_eq!(aura_mode_name(6), "highlight");
+    }
+
+    #[test]
+    fn test_aura_mode_name_unknown() {
+        assert_eq!(aura_mode_name(99), "mode");
+    }
+
+    // -- epp_name tests ---------------------------------------------------
+
+    #[test]
+    fn test_epp_name_all_known() {
+        assert_eq!(epp_name(0), "performance");
+        assert_eq!(epp_name(1), "balance-perf");
+        assert_eq!(epp_name(2), "default");
+        assert_eq!(epp_name(3), "balance-power");
+        assert_eq!(epp_name(4), "power-save");
+    }
+
+    #[test]
+    fn test_epp_name_unknown() {
+        assert_eq!(epp_name(10), "epp");
+    }
+
+    // -- profile_int / profile_name extra tests ---------------------------
+
+    #[test]
+    fn test_profile_int_lowpower() {
+        assert_eq!(profile_int("LowPower"), Some(3));
+    }
+
+    #[test]
+    fn test_profile_name_lowpower() {
+        assert_eq!(profile_name(3), Some("LowPower"));
+    }
+
+    #[test]
+    fn test_profile_int_unknown() {
+        assert_eq!(profile_int("Unknown"), None);
+    }
+
+    #[test]
+    fn test_profile_name_unknown() {
+        assert_eq!(profile_name(99), None);
+    }
+
+    #[test]
+    fn test_profile_roundtrip_lowpower() {
+        assert_eq!(profile_name(profile_int("LowPower").unwrap()), Some("LowPower"));
+    }
 }

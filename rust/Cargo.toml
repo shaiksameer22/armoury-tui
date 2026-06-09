@@ -1,6 +1,6 @@
 [package]
 name = "armoury-tui"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "ASUS Armoury-Crate-style monitoring and control TUI for Linux laptops (ROG/TUF) — Rust rewrite."
 license = "MIT"

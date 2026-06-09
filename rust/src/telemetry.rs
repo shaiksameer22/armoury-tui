@@ -940,3 +940,130 @@ fn spark(v: &[f64]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- spark() tests -----------------------------------------------------
+
+    #[test]
+    fn test_spark_empty() {
+        // Empty slice: lo=+inf, hi=-inf, span=1.0, loop body never runs → empty string
+        let result = spark(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_spark_single_value() {
+        let result = spark(&[42.0]);
+        // Single value: lo==hi, span=1.0, (42-42)/1*7 = 0 → first block char
+        assert_eq!(result.chars().count(), 1); // one character for one sample
+        assert_eq!(result.chars().next().unwrap(), '▁');
+    }
+
+    #[test]
+    fn test_spark_constant_values() {
+        // All the same value: lo==hi, span=1.0, every value maps to index 0
+        let result = spark(&[5.0, 5.0, 5.0, 5.0, 5.0]);
+        assert!(!result.is_empty());
+        // All characters should be the same (lowest block)
+        for ch in result.chars() {
+            assert_eq!(ch, '▁');
+        }
+    }
+
+    #[test]
+    fn test_spark_ascending_values() {
+        // Ascending 0..7 should produce increasingly taller blocks
+        let vals: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let result = spark(&vals);
+        assert!(!result.is_empty());
+        let chars: Vec<char> = result.chars().collect();
+        // First char should be lowest block, last should be highest
+        assert_eq!(chars[0], '▁');
+        assert_eq!(*chars.last().unwrap(), '█');
+    }
+
+    #[test]
+    fn test_spark_two_values() {
+        let result = spark(&[0.0, 100.0]);
+        let chars: Vec<char> = result.chars().collect();
+        assert_eq!(chars.len(), 2);
+        assert_eq!(chars[0], '▁'); // min → index 0
+        assert_eq!(chars[1], '█'); // max → index 7
+    }
+
+    // -- capacity_ratio() tests -------------------------------------------
+
+    #[test]
+    fn test_capacity_ratio_normal() {
+        let dir = std::env::temp_dir().join(format!("telem_cr_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("charge_full"), "80").unwrap();
+        std::fs::write(dir.join("charge_full_design"), "100").unwrap();
+        let ratio = capacity_ratio(&dir, "charge");
+        assert!(ratio.is_some());
+        assert!((ratio.unwrap() - 80.0).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_capacity_ratio_design_zero() {
+        let dir = std::env::temp_dir().join(format!("telem_cr0_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("energy_full"), "80").unwrap();
+        std::fs::write(dir.join("energy_full_design"), "0").unwrap();
+        let ratio = capacity_ratio(&dir, "energy");
+        // design=0 → (0 > 0) is false → None
+        assert!(ratio.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_capacity_ratio_missing_files() {
+        let dir = std::env::temp_dir().join(format!("telem_crm_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // No charge_full or charge_full_design files
+        let ratio = capacity_ratio(&dir, "charge");
+        assert!(ratio.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_capacity_ratio_partial_files() {
+        let dir = std::env::temp_dir().join(format!("telem_crp_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Only full, no design
+        std::fs::write(dir.join("charge_full"), "80").unwrap();
+        let ratio = capacity_ratio(&dir, "charge");
+        assert!(ratio.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -- kill_process() tests ---------------------------------------------
+
+    #[test]
+    fn test_kill_process_pid_1() {
+        let (ok, msg) = kill_process(1, false);
+        assert!(!ok);
+        assert!(msg.contains("refusing"));
+    }
+
+    #[test]
+    fn test_kill_process_own_pid() {
+        let own = std::process::id();
+        let (ok, msg) = kill_process(own, false);
+        assert!(!ok);
+        assert!(msg.contains("refusing"));
+    }
+
+    #[test]
+    fn test_kill_process_nonexistent() {
+        // Use a very high PID that almost certainly doesn't exist
+        let (ok, msg) = kill_process(99_999_999, false);
+        assert!(!ok);
+        // Should report "already gone" (ESRCH) or "permission denied" (EPERM)
+        assert!(msg.contains("already gone") || msg.contains("permission denied") || msg.contains("failed"));
+    }
+}

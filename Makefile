@@ -1,7 +1,7 @@
 # armoury-tui — convenience targets. The real installer is ./install.sh.
 MANIFEST := rust/Cargo.toml
 
-.PHONY: build install system-install uninstall run probe test fmt clean
+.PHONY: build install system-install uninstall run probe test fmt clippy check clean
 
 build:        ## compile the release binary
 	cargo build --release --manifest-path $(MANIFEST)
@@ -26,6 +26,12 @@ test:         ## run the unit tests
 
 fmt:          ## format the Rust sources
 	cargo fmt --manifest-path $(MANIFEST)
+
+clippy:       ## lint with clippy (deny warnings, matches CI)
+	cargo clippy --manifest-path $(MANIFEST) -- -D warnings
+
+check:        ## quick type-check without building
+	cargo check --manifest-path $(MANIFEST)
 
 clean:        ## remove build artifacts
 	cargo clean --manifest-path $(MANIFEST)
