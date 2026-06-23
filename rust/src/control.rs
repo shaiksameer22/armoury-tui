@@ -543,8 +543,8 @@ mod tests {
     }
 
     #[test]
-    fn test_aura_mode_name_pulse() {
-        assert_eq!(aura_mode_name(2), "pulse");
+    fn test_aura_mode_name_color_cycle() {
+        assert_eq!(aura_mode_name(2), "color-cycle");
     }
 
     #[test]
