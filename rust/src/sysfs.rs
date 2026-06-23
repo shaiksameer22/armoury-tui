@@ -75,9 +75,7 @@ pub fn glob_in(dir: impl AsRef<Path>, prefix: &str, suffix: &str) -> Vec<PathBuf
 /// `true` if a command is found on `$PATH` (replaces `shutil.which`).
 pub fn which(cmd: &str) -> bool {
     std::env::var_os("PATH")
-        .map(|paths| {
-            std::env::split_paths(&paths).any(|dir| dir.join(cmd).is_file())
-        })
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(cmd).is_file()))
         .unwrap_or(false)
 }
 
@@ -113,7 +111,10 @@ mod tests {
 
     #[test]
     fn test_read_text_nonexistent() {
-        assert_eq!(read_text("/tmp/this_path_does_not_exist_armoury_123456"), None);
+        assert_eq!(
+            read_text("/tmp/this_path_does_not_exist_armoury_123456"),
+            None
+        );
     }
 
     // -- read_int tests ----------------------------------------------------

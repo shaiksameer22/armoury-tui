@@ -190,7 +190,9 @@ impl App {
         // Connections enumeration scans /proc — only do it while the tab is open.
         if self.tab == 3 {
             let tel = Arc::clone(&self.tel);
-            if let Ok(c) = tokio::task::spawn_blocking(move || tel.lock().unwrap().connections(60)).await {
+            if let Ok(c) =
+                tokio::task::spawn_blocking(move || tel.lock().unwrap().connections(60)).await
+            {
                 self.connections = c;
             }
         }
@@ -226,7 +228,13 @@ impl App {
         let prof = self.curve_profile.clone();
         let res = tokio::task::spawn_blocking(move || {
             let c = ctl.lock().unwrap();
-            (c.get_fan_curves(&prof), c.current_aura_mode(), c.supported_aura_modes(), c.auto_profiles(), c.epps())
+            (
+                c.get_fan_curves(&prof),
+                c.current_aura_mode(),
+                c.supported_aura_modes(),
+                c.auto_profiles(),
+                c.epps(),
+            )
         })
         .await;
         if let Ok((curves, mode, supported, auto, epps)) = res {
@@ -250,19 +258,32 @@ impl App {
         let idx = self.profiles.iter().position(|n| Some(n) == cur.as_ref());
         let next = idx.map(|i| (i + 1) % self.profiles.len()).unwrap_or(0);
         let name = self.profiles[next].clone();
-        self.run_ctl(format!("→ {name} profile"), move |c| c.set_profile(&name)).await;
+        self.run_ctl(format!("→ {name} profile"), move |c| c.set_profile(&name))
+            .await;
     }
 
     async fn adjust_charge(&mut self, delta: i64) {
-        let cur = self.latest.as_ref().and_then(|s| s.battery.charge_limit).unwrap_or(80);
+        let cur = self
+            .latest
+            .as_ref()
+            .and_then(|s| s.battery.charge_limit)
+            .unwrap_or(80);
         let nv = (cur + delta).clamp(20, 100);
-        self.run_ctl(format!("→ charge limit {nv}%"), move |c| c.set_charge_limit(nv)).await;
+        self.run_ctl(format!("→ charge limit {nv}%"), move |c| {
+            c.set_charge_limit(nv)
+        })
+        .await;
     }
 
     async fn adjust_brightness(&mut self, delta: i64) {
-        let cur = self.latest.as_ref().and_then(|s| s.kbd_brightness).unwrap_or(0);
+        let cur = self
+            .latest
+            .as_ref()
+            .and_then(|s| s.kbd_brightness)
+            .unwrap_or(0);
         let nv = (cur + delta).clamp(0, 3);
-        self.run_ctl("→ brightness", move |c| c.set_brightness(nv)).await;
+        self.run_ctl("→ brightness", move |c| c.set_brightness(nv))
+            .await;
     }
 
     async fn cycle_aura(&mut self) {
@@ -274,25 +295,36 @@ impl App {
         let mode = self.aura_mode.unwrap_or(0);
         let (c1, c2) = (self.aura_c1, self.aura_c2);
         let (sp, dr) = (self.aura_speed.clone(), self.aura_dir.clone());
-        self.run_ctl("aura…", move |c| c.set_aura_full(mode, c1, c2, &sp, &dr)).await;
+        self.run_ctl("aura…", move |c| c.set_aura_full(mode, c1, c2, &sp, &dr))
+            .await;
     }
 
     async fn curve_enable(&mut self, enabled: bool) {
         let prof = self.curve_profile.clone();
         let verb = if enabled { "enabling" } else { "disabling" };
-        self.run_ctl(format!("{verb} {prof} curves…"), move |c| c.set_curve_enabled(&prof, enabled)).await;
+        self.run_ctl(format!("{verb} {prof} curves…"), move |c| {
+            c.set_curve_enabled(&prof, enabled)
+        })
+        .await;
     }
 
     async fn curve_reset(&mut self) {
         let prof = self.curve_profile.clone();
-        self.run_ctl(format!("resetting {prof} curve…"), move |c| c.reset_fan_curve(&prof)).await;
+        self.run_ctl(format!("resetting {prof} curve…"), move |c| {
+            c.reset_fan_curve(&prof)
+        })
+        .await;
     }
 
     fn switch_curve_profile(&mut self) {
         if self.profiles.is_empty() {
             return;
         }
-        let idx = self.profiles.iter().position(|n| *n == self.curve_profile).unwrap_or(0);
+        let idx = self
+            .profiles
+            .iter()
+            .position(|n| *n == self.curve_profile)
+            .unwrap_or(0);
         self.curve_profile = self.profiles[(idx + 1) % self.profiles.len()].clone();
     }
 
@@ -341,7 +373,9 @@ impl App {
         // Kill-confirm modal swallows all input.
         if let Some((pid, _, force)) = self.confirm.clone() {
             match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => self.do_kill(pid, force).await,
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    self.do_kill(pid, force).await
+                }
                 _ => self.confirm = None,
             }
             return false;
@@ -378,7 +412,10 @@ impl App {
                     KeyCode::Char('p') => self.cycle_profile().await,
                     KeyCode::Char(']') => self.adjust_charge(5).await,
                     KeyCode::Char('[') => self.adjust_charge(-5).await,
-                    KeyCode::Char('s') => { self.switch_curve_profile(); self.reload_curves().await; }
+                    KeyCode::Char('s') => {
+                        self.switch_curve_profile();
+                        self.reload_curves().await;
+                    }
                     KeyCode::Char('c') => self.curve_adjust(5).await,
                     KeyCode::Char('v') => self.curve_adjust(-5).await,
                     KeyCode::Char('e') => self.curve_enable(true).await,
@@ -439,11 +476,17 @@ impl App {
     async fn dispatch(&mut self, act: Act) {
         match act {
             Act::Tab(i) => self.tab = i,
-            Act::Profile(name) => self.run_ctl(format!("→ {name} profile"), move |c| c.set_profile(&name)).await,
+            Act::Profile(name) => {
+                self.run_ctl(format!("→ {name} profile"), move |c| c.set_profile(&name))
+                    .await
+            }
             Act::Charge(d) => self.adjust_charge(d).await,
             Act::Brightness(d) => self.adjust_brightness(d).await,
             Act::AuraCycle => self.cycle_aura().await,
-            Act::AuraColor(rgb) => { self.aura_c1 = rgb; self.apply_aura().await; }
+            Act::AuraColor(rgb) => {
+                self.aura_c1 = rgb;
+                self.apply_aura().await;
+            }
             Act::AuraSpeed => {
                 self.aura_speed = match self.aura_speed.as_str() {
                     "Low" => "Med",
@@ -463,7 +506,10 @@ impl App {
                 .into();
                 self.apply_aura().await;
             }
-            Act::SwitchCurveProfile => { self.switch_curve_profile(); self.reload_curves().await; }
+            Act::SwitchCurveProfile => {
+                self.switch_curve_profile();
+                self.reload_curves().await;
+            }
             Act::CurveAdjust(d) => self.curve_adjust(d).await,
             Act::CurveEnable(b) => self.curve_enable(b).await,
             Act::CurveReset => self.curve_reset().await,
@@ -480,13 +526,19 @@ impl App {
                 }
             }
             Act::CycleTheme => self.cycle_theme(),
-            Act::FullCharge => self.run_ctl("one-shot full charge…", |c| c.one_shot_full_charge()).await,
+            Act::FullCharge => {
+                self.run_ctl("one-shot full charge…", |c| c.one_shot_full_charge())
+                    .await
+            }
             Act::AutoSwitch(on_ac) => {
                 let enabled = match self.auto {
                     Some((_, _, ac, bat)) => !(if on_ac { ac } else { bat }),
                     None => true,
                 };
-                self.run_ctl("auto profile…", move |c| c.set_auto_switch(on_ac, enabled)).await;
+                self.run_ctl("auto profile…", move |c| {
+                    c.set_auto_switch(on_ac, enabled)
+                })
+                .await;
             }
             Act::CycleEpp => {
                 if let Some(prof) = self.current_profile() {
@@ -511,17 +563,29 @@ impl App {
 
     /// Filtered + sorted process rows for the current view (top N).
     fn proc_rows(&self) -> Vec<ProcInfo> {
-        let Some(s) = &self.latest else { return Vec::new() };
+        let Some(s) = &self.latest else {
+            return Vec::new();
+        };
         let f = self.proc_filter.to_lowercase();
         let mut rows: Vec<ProcInfo> = s
             .procs_all
             .iter()
-            .filter(|p| f.is_empty() || p.name.to_lowercase().contains(&f) || p.pid.to_string() == f)
+            .filter(|p| {
+                f.is_empty() || p.name.to_lowercase().contains(&f) || p.pid.to_string() == f
+            })
             .cloned()
             .collect();
         match self.proc_sort {
-            "cpu" => rows.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal)),
-            "mem" => rows.sort_by(|a, b| b.mem_mb.partial_cmp(&a.mem_mb).unwrap_or(std::cmp::Ordering::Equal)),
+            "cpu" => rows.sort_by(|a, b| {
+                b.cpu
+                    .partial_cmp(&a.cpu)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }),
+            "mem" => rows.sort_by(|a, b| {
+                b.mem_mb
+                    .partial_cmp(&a.mem_mb)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }),
             "pid" => rows.sort_by_key(|p| p.pid),
             _ => rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
         }
@@ -530,13 +594,20 @@ impl App {
     }
 
     fn proc_name(&self, pid: u32) -> Option<String> {
-        self.latest.as_ref()?.procs_all.iter().find(|p| p.pid == pid).map(|p| p.name.clone())
+        self.latest
+            .as_ref()?
+            .procs_all
+            .iter()
+            .find(|p| p.pid == pid)
+            .map(|p| p.name.clone())
     }
 
     async fn select_pid(&mut self, pid: u32) {
         self.selected_pid = Some(pid);
         let tel = Arc::clone(&self.tel);
-        if let Ok(d) = tokio::task::spawn_blocking(move || tel.lock().unwrap().process_detail(pid)).await {
+        if let Ok(d) =
+            tokio::task::spawn_blocking(move || tel.lock().unwrap().process_detail(pid)).await
+        {
             self.detail = d;
         }
     }
@@ -546,7 +617,9 @@ impl App {
         if rows.is_empty() {
             return;
         }
-        let cur = self.selected_pid.and_then(|pid| rows.iter().position(|p| p.pid == pid));
+        let cur = self
+            .selected_pid
+            .and_then(|pid| rows.iter().position(|p| p.pid == pid));
         let ni = match cur {
             Some(i) => (i as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize,
             None => 0,
@@ -592,7 +665,10 @@ impl App {
             }
         }
         for f in &s.fans {
-            push(self.fan_hist.entry(f.label.clone()).or_default(), f.rpm as f64);
+            push(
+                self.fan_hist.entry(f.label.clone()).or_default(),
+                f.rpm as f64,
+            );
         }
         let mut tot_down = 0.0;
         let mut tot_up = 0.0;
@@ -608,8 +684,12 @@ impl App {
 
     /// Rising-edge thermal alerts (cool→hot only, so we don't spam).
     fn check_alerts(&mut self, s: &Snapshot) {
-        let (cpu_lim, gpu_lim, batt_lim, fan_lim) =
-            (self.cfg.cpu_temp_alert, self.cfg.gpu_temp_alert, self.cfg.batt_low_pct, self.cfg.fan_stall_temp);
+        let (cpu_lim, gpu_lim, batt_lim, fan_lim) = (
+            self.cfg.cpu_temp_alert,
+            self.cfg.gpu_temp_alert,
+            self.cfg.batt_low_pct,
+            self.cfg.fan_stall_temp,
+        );
         if let Some(t) = s.cpu.temp_c {
             let hot = t >= cpu_lim;
             if hot && !self.alert_cpu {
@@ -629,7 +709,10 @@ impl App {
         // Battery low (rising edge), only while discharging.
         let b = &s.battery;
         if b.present {
-            let discharging = b.rate_w.map(|r| r < 0.0).unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
+            let discharging = b
+                .rate_w
+                .map(|r| r < 0.0)
+                .unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
             let low = b.percent.map(|p| p < batt_lim).unwrap_or(false) && discharging;
             if low && !self.batt_alerted {
                 self.alert(format!("⚠ battery low: {:.0}%", b.percent.unwrap_or(0.0)));
@@ -653,10 +736,15 @@ impl App {
         }
         let b = &s.battery;
         let discharging = b.present
-            && b.rate_w.map(|r| r < 0.0).unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
+            && b.rate_w
+                .map(|r| r < 0.0)
+                .unwrap_or(b.status.eq_ignore_ascii_case("discharging"));
         let pct = b.percent.unwrap_or(100.0);
         let hit = if discharging {
-            self.cfg.rules.iter().position(|r| pct < r.battery_below as f64)
+            self.cfg
+                .rules
+                .iter()
+                .position(|r| pct < r.battery_below as f64)
         } else {
             None
         };
@@ -709,7 +797,16 @@ impl App {
             let hints: HashMap<&str, zbus::zvariant::Value> = HashMap::new();
             let _: zbus::Result<u32> = p.call(
                 "Notify",
-                &("armoury-tui", 0u32, "utilities-terminal", summary, body, Vec::<&str>::new(), hints, 6000i32),
+                &(
+                    "armoury-tui",
+                    0u32,
+                    "utilities-terminal",
+                    summary,
+                    body,
+                    Vec::<&str>::new(),
+                    hints,
+                    6000i32,
+                ),
             );
         }
     }
@@ -730,11 +827,19 @@ impl App {
             s.profile.clone().unwrap_or_default(),
             s.cpu.overall,
             g(s.cpu.temp_c, 0),
-            if s.gpu.present { g(s.gpu.util, 1) } else { String::new() },
+            if s.gpu.present {
+                g(s.gpu.util, 1)
+            } else {
+                String::new()
+            },
             g(s.gpu.temp_c, 0),
             g(s.gpu.power_w, 1),
-            fans.get("cpu_fan").map(|v| v.to_string()).unwrap_or_default(),
-            fans.get("gpu_fan").map(|v| v.to_string()).unwrap_or_default(),
+            fans.get("cpu_fan")
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            fans.get("gpu_fan")
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
             s.mem.percent,
             g(s.battery.percent, 0),
             g(s.battery.rate_w, 1),
@@ -757,8 +862,14 @@ fn vec_of(d: &VecDeque<f64>) -> Vec<f64> {
 const LOG_COLS: &str = "ts,profile,cpu_pct,cpu_temp,gpu_pct,gpu_temp,gpu_power_w,fan_cpu_rpm,fan_gpu_rpm,mem_pct,batt_pct,batt_rate_w";
 
 fn open_log(path: &str) -> Option<std::fs::File> {
-    let fresh = std::fs::metadata(path).map(|m| m.len() == 0).unwrap_or(true);
-    let mut fh = std::fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
+    let fresh = std::fs::metadata(path)
+        .map(|m| m.len() == 0)
+        .unwrap_or(true);
+    let mut fh = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()?;
     if fresh {
         let _ = writeln!(fh, "{LOG_COLS}");
     }
@@ -783,7 +894,11 @@ pub async fn run(refresh: f64, log_path: Option<String>) -> Result<()> {
     result
 }
 
-async fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App, refresh: f64) -> Result<()> {
+async fn event_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    app: &mut App,
+    refresh: f64,
+) -> Result<()> {
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_secs_f64(refresh));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -827,7 +942,11 @@ fn draw(frame: &mut Frame, app: &App) {
 
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(frame.area());
 
     // Clickable tab bar.
@@ -841,7 +960,9 @@ fn draw(frame: &mut Frame, app: &App) {
     // Content.
     match app.latest.as_ref() {
         None => {
-            let p = Paragraph::new("collecting telemetry…").style(Style::new().fg(dim())).block(Block::bordered());
+            let p = Paragraph::new("collecting telemetry…")
+                .style(Style::new().fg(dim()))
+                .block(Block::bordered());
             frame.render_widget(p, root[1]);
         }
         Some(s) => match app.tab {
@@ -856,9 +977,10 @@ fn draw(frame: &mut Frame, app: &App) {
 
     // Footer: a transient toast, else key hints.
     let footer = match &app.toast {
-        Some((msg, born, color)) if born.elapsed() < Duration::from_secs(6) => {
-            Line::styled(format!("  {msg}"), Style::new().fg(*color).add_modifier(Modifier::BOLD))
-        }
+        Some((msg, born, color)) if born.elapsed() < Duration::from_secs(6) => Line::styled(
+            format!("  {msg}"),
+            Style::new().fg(*color).add_modifier(Modifier::BOLD),
+        ),
         _ => Line::from(vec![
             Span::styled("  click ", Style::new().fg(neon())),
             Span::styled("or ", Style::new().fg(dim())),
@@ -887,10 +1009,18 @@ fn draw_help(frame: &mut Frame) {
     let area = frame.area();
     let w = 64u16.min(area.width);
     let h = 22u16.min(area.height);
-    let rect = Rect { x: (area.width - w) / 2, y: (area.height - h) / 2, width: w, height: h };
+    let rect = Rect {
+        x: (area.width - w) / 2,
+        y: (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
-        .title(Span::styled(" KEYS & MOUSE ", Style::new().fg(neon()).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " KEYS & MOUSE ",
+            Style::new().fg(neon()).add_modifier(Modifier::BOLD),
+        ))
         .border_style(Style::new().fg(neon()));
     let row = |k: &'static str, d: &'static str| {
         Line::from(vec![
@@ -898,7 +1028,12 @@ fn draw_help(frame: &mut Frame) {
             Span::styled(d, Style::new().fg(text())),
         ])
     };
-    let head = |t: &'static str| Line::styled(format!("  {t}"), Style::new().fg(magenta()).add_modifier(Modifier::BOLD));
+    let head = |t: &'static str| {
+        Line::styled(
+            format!("  {t}"),
+            Style::new().fg(magenta()).add_modifier(Modifier::BOLD),
+        )
+    };
     let body = vec![
         head("global"),
         row("1–5 / click", "switch tab"),
@@ -930,11 +1065,19 @@ fn draw_help(frame: &mut Frame) {
 /// Render a labelled chip and register its rect as a click zone.
 fn button(frame: &mut Frame, app: &App, rect: Rect, label: &str, active: bool, act: Act) {
     let style = if active {
-        Style::new().fg(Color::Black).bg(neon()).add_modifier(Modifier::BOLD)
+        Style::new()
+            .fg(Color::Black)
+            .bg(neon())
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::new().fg(text()).bg(Color::Rgb(0x1c, 0x24, 0x33))
     };
-    frame.render_widget(Paragraph::new(format!("  {label}  ")).style(style).alignment(Alignment::Center), rect);
+    frame.render_widget(
+        Paragraph::new(format!("  {label}  "))
+            .style(style)
+            .alignment(Alignment::Center),
+        rect,
+    );
     app.zone(rect, act);
 }
 
@@ -947,19 +1090,47 @@ fn place_buttons(frame: &mut Frame, app: &App, row: Rect, btns: Vec<(String, boo
         if x + w > end {
             break;
         }
-        button(frame, app, Rect { x, y: row.y, width: w, height: 1 }, &label, active, act);
+        button(
+            frame,
+            app,
+            Rect {
+                x,
+                y: row.y,
+                width: w,
+                height: 1,
+            },
+            &label,
+            active,
+            act,
+        );
         x += w + 2;
     }
 }
 
 /// A dim label on the left of a row, then clickable chips to its right.
-fn labeled_buttons(frame: &mut Frame, app: &App, row: Rect, label: &str, btns: Vec<(String, bool, Act)>) {
+fn labeled_buttons(
+    frame: &mut Frame,
+    app: &App,
+    row: Rect,
+    label: &str,
+    btns: Vec<(String, bool, Act)>,
+) {
     let lw = 16u16.min(row.width);
     frame.render_widget(
         Paragraph::new(Span::styled(label.to_string(), Style::new().fg(dim()))),
-        Rect { x: row.x, y: row.y, width: lw, height: 1 },
+        Rect {
+            x: row.x,
+            y: row.y,
+            width: lw,
+            height: 1,
+        },
     );
-    let brow = Rect { x: row.x + lw, y: row.y, width: row.width.saturating_sub(lw), height: 1 };
+    let brow = Rect {
+        x: row.x + lw,
+        y: row.y,
+        width: row.width.saturating_sub(lw),
+        height: 1,
+    };
     place_buttons(frame, app, brow, btns);
 }
 
@@ -967,7 +1138,12 @@ fn draw_confirm(frame: &mut Frame, app: &App, pid: u32, name: &str, force: bool)
     let area = frame.area();
     let w = 56u16.min(area.width);
     let h = 8u16.min(area.height);
-    let rect = Rect { x: (area.width - w) / 2, y: (area.height - h) / 2, width: w, height: h };
+    let rect = Rect {
+        x: (area.width - w) / 2,
+        y: (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
         .title(" ⚠  KILL PROCESS ")
@@ -975,16 +1151,34 @@ fn draw_confirm(frame: &mut Frame, app: &App, pid: u32, name: &str, force: bool)
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
-    let sig = if force { "SIGKILL — force, no cleanup" } else { "SIGTERM — graceful" };
+    let sig = if force {
+        "SIGKILL — force, no cleanup"
+    } else {
+        "SIGTERM — graceful"
+    };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(inner);
     frame.render_widget(
-        Paragraph::new(Line::styled(format!("{name}  (PID {pid})"), Style::new().fg(cyan()))),
+        Paragraph::new(Line::styled(
+            format!("{name}  (PID {pid})"),
+            Style::new().fg(cyan()),
+        )),
         rows[0],
     );
-    frame.render_widget(Paragraph::new(Line::styled(format!("signal: {sig}"), Style::new().fg(dim()))), rows[1]);
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            format!("signal: {sig}"),
+            Style::new().fg(dim()),
+        )),
+        rows[1],
+    );
     place_buttons(
         frame,
         app,
@@ -997,7 +1191,10 @@ fn draw_confirm(frame: &mut Frame, app: &App, pid: u32, name: &str, force: bool)
 }
 
 fn fan_hist_map(app: &App) -> HashMap<String, Vec<f64>> {
-    app.fan_hist.iter().map(|(k, v)| (k.clone(), vec_of(v))).collect()
+    app.fan_hist
+        .iter()
+        .map(|(k, v)| (k.clone(), vec_of(v)))
+        .collect()
 }
 
 fn draw_dashboard(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
@@ -1015,20 +1212,29 @@ fn draw_dashboard(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 
     frame.render_widget(render::headline_strip(s), rows[0]);
 
-    let r1 = Layout::default().direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)]).split(rows[1]);
+    let r1 = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(rows[1]);
     frame.render_widget(render::system_panel(&app.hw, s), r1[0]);
     frame.render_widget(render::profile_banner(s), r1[1]);
 
-    let r2 = Layout::default().direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[2]);
+    let r2 = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[2]);
     frame.render_widget(render::cpu_panel(s, &vec_of(&app.cpu_hist)), r2[0]);
     frame.render_widget(render::gpu_panel(s, &vec_of(&app.gpu_hist)), r2[1]);
 
-    frame.render_widget(render::thermal_graph_panel(s, &vec_of(&app.cputemp_hist), &vec_of(&app.gputemp_hist)), rows[3]);
+    frame.render_widget(
+        render::thermal_graph_panel(s, &vec_of(&app.cputemp_hist), &vec_of(&app.gputemp_hist)),
+        rows[3],
+    );
 
-    let r4 = Layout::default().direction(Direction::Horizontal)
-        .constraints([Constraint::Ratio(1, 4); 4]).split(rows[4]);
+    let r4 = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Ratio(1, 4); 4])
+        .split(rows[4]);
     frame.render_widget(render::mem_panel(s), r4[0]);
     frame.render_widget(render::fan_panel(s, &fans), r4[1]);
     frame.render_widget(render::battery_panel(s), r4[2]);
@@ -1049,7 +1255,10 @@ fn draw_power(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 
     draw_power_controls(frame, app, s, rows[0]);
     let active = app.current_profile().as_deref() == Some(app.curve_profile.as_str());
-    frame.render_widget(render::fan_curve_panel(&app.curves, &app.curve_profile, active), rows[1]);
+    frame.render_widget(
+        render::fan_curve_panel(&app.curves, &app.curve_profile, active),
+        rows[1],
+    );
     frame.render_widget(render::fan_graph_panel(s, &fans), rows[2]);
     frame.render_widget(render::battery_panel(s), rows[3]);
 }
@@ -1057,7 +1266,10 @@ fn draw_power(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 /// Clickable profile / charge / fan-curve controls inside a CONTROLS panel.
 fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let block = Block::bordered()
-        .title(Span::styled(" CONTROLS ", Style::new().fg(neon()).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " CONTROLS ",
+            Style::new().fg(neon()).add_modifier(Modifier::BOLD),
+        ))
         .border_style(Style::new().fg(neon()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1077,7 +1289,11 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         .collect();
     labeled_buttons(frame, app, r[0], "profile", profs);
 
-    let limit = s.battery.charge_limit.map(|l| format!("{l}%")).unwrap_or_else(|| "—".into());
+    let limit = s
+        .battery
+        .charge_limit
+        .map(|l| format!("{l}%"))
+        .unwrap_or_else(|| "—".into());
     labeled_buttons(
         frame,
         app,
@@ -1109,8 +1325,16 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let mut auto_btns: Vec<(String, bool, Act)> = Vec::new();
     if let Some((ppoa, ppob, cac, cbat)) = app.auto {
         let pn = |i| crate::control::profile_name(i).unwrap_or("?");
-        auto_btns.push((format!("AC:{} {}", pn(ppoa), if cac { "✓" } else { "✗" }), cac, Act::AutoSwitch(true)));
-        auto_btns.push((format!("bat:{} {}", pn(ppob), if cbat { "✓" } else { "✗" }), cbat, Act::AutoSwitch(false)));
+        auto_btns.push((
+            format!("AC:{} {}", pn(ppoa), if cac { "✓" } else { "✗" }),
+            cac,
+            Act::AutoSwitch(true),
+        ));
+        auto_btns.push((
+            format!("bat:{} {}", pn(ppob), if cbat { "✓" } else { "✗" }),
+            cbat,
+            Act::AutoSwitch(false),
+        ));
     }
     if let Some((bal, perf, quiet)) = app.epps {
         let epp = match cur.as_deref() {
@@ -1119,7 +1343,11 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
             Some("Quiet") => quiet,
             _ => bal,
         };
-        auto_btns.push((format!("EPP:{}", crate::control::epp_name(epp)), false, Act::CycleEpp));
+        auto_btns.push((
+            format!("EPP:{}", crate::control::epp_name(epp)),
+            false,
+            Act::CycleEpp,
+        ));
     }
     if !auto_btns.is_empty() {
         labeled_buttons(frame, app, r[3], "auto/epp", auto_btns);
@@ -1136,9 +1364,15 @@ fn draw_power_controls(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     }
 
     let hint = if app.control_available {
-        Span::styled("p [ ] s c v e d x · f full-charge · a/b auto · g epp · ◈ presets (edit config.toml)", Style::new().fg(dim()))
+        Span::styled(
+            "p [ ] s c v e d x · f full-charge · a/b auto · g epp · ◈ presets (edit config.toml)",
+            Style::new().fg(dim()),
+        )
     } else {
-        Span::styled("asusd unreachable — controls disabled", Style::new().fg(red()))
+        Span::styled(
+            "asusd unreachable — controls disabled",
+            Style::new().fg(red()),
+        )
     };
     frame.render_widget(Paragraph::new(hint), r[5]);
 }
@@ -1197,7 +1431,12 @@ const SWATCHES: [(u8, u8, u8); 12] = [
 fn draw_swatches(frame: &mut Frame, app: &App, row: Rect) {
     frame.render_widget(
         Paragraph::new(Span::styled("colour ", Style::new().fg(dim()))),
-        Rect { x: row.x, y: row.y, width: 8.min(row.width), height: 1 },
+        Rect {
+            x: row.x,
+            y: row.y,
+            width: 8.min(row.width),
+            height: 1,
+        },
     );
     let mut x = row.x + 8;
     let end = row.x + row.width;
@@ -1206,13 +1445,21 @@ fn draw_swatches(frame: &mut Frame, app: &App, row: Rect) {
         if x + w > end {
             break;
         }
-        let r = Rect { x, y: row.y, width: w, height: 1 };
+        let r = Rect {
+            x,
+            y: row.y,
+            width: w,
+            height: 1,
+        };
         let active = app.aura_c1 == rgb;
         let bg = Color::Rgb(rgb.0, rgb.1, rgb.2);
         frame.render_widget(
-            Paragraph::new(Span::styled(if active { " ◉ " } else { "   " }, Style::new().fg(Color::Black).bg(bg)))
-                .alignment(Alignment::Center)
-                .style(Style::new().bg(bg)),
+            Paragraph::new(Span::styled(
+                if active { " ◉ " } else { "   " },
+                Style::new().fg(Color::Black).bg(bg),
+            ))
+            .alignment(Alignment::Center)
+            .style(Style::new().bg(bg)),
             r,
         );
         app.zone(r, Act::AuraColor(rgb));
@@ -1223,7 +1470,11 @@ fn draw_swatches(frame: &mut Frame, app: &App, row: Rect) {
 fn draw_processes(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(6), Constraint::Length(11)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(6),
+            Constraint::Length(11),
+        ])
         .split(area);
     draw_proc_controls(frame, app, rows[0]);
     draw_proc_table(frame, app, rows[1]);
@@ -1253,8 +1504,14 @@ fn draw_proc_controls(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("filter: ", Style::new().fg(dim())),
-            Span::styled(format!("{}{}", app.proc_filter, cursor), Style::new().fg(fcol)),
-            Span::styled("   ( / edit · ↑↓ select · k SIGTERM · K SIGKILL )", Style::new().fg(dim())),
+            Span::styled(
+                format!("{}{}", app.proc_filter, cursor),
+                Style::new().fg(fcol),
+            ),
+            Span::styled(
+                "   ( / edit · ↑↓ select · k SIGTERM · K SIGKILL )",
+                Style::new().fg(dim()),
+            ),
         ])),
         r[1],
     );
@@ -1262,7 +1519,10 @@ fn draw_proc_controls(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_proc_table(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::bordered()
-        .title(Span::styled(" PROCESSES ", Style::new().fg(neon()).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " PROCESSES ",
+            Style::new().fg(neon()).add_modifier(Modifier::BOLD),
+        ))
         .border_style(Style::new().fg(neon()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1278,22 +1538,41 @@ fn draw_proc_table(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!("{:>9}", "MEM MB"), Style::new().fg(dim())),
             Span::styled(format!("{:>7}", "MEM%"), Style::new().fg(dim())),
         ])),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
     );
     // Rows.
     let rows = app.proc_rows();
     let visible = (inner.height - 1) as usize;
     for (i, p) in rows.iter().take(visible).enumerate() {
         let y = inner.y + 1 + i as u16;
-        let rrect = Rect { x: inner.x, y, width: inner.width, height: 1 };
+        let rrect = Rect {
+            x: inner.x,
+            y,
+            width: inner.width,
+            height: 1,
+        };
         let selected = Some(p.pid) == app.selected_pid;
         let name: String = p.name.chars().take(25).collect();
         let line = Line::from(vec![
             Span::styled(format!("{:<7}", p.pid), Style::new().fg(dim())),
-            Span::styled(format!("{:<26}", name), Style::new().fg(if selected { neon() } else { text() })),
-            Span::styled(format!("{:>6.1} ", p.cpu), Style::new().fg(render::grade((p.cpu.min(100.0)) / 100.0, true))),
+            Span::styled(
+                format!("{:<26}", name),
+                Style::new().fg(if selected { neon() } else { text() }),
+            ),
+            Span::styled(
+                format!("{:>6.1} ", p.cpu),
+                Style::new().fg(render::grade((p.cpu.min(100.0)) / 100.0, true)),
+            ),
             Span::styled(format!("{:>8.0} ", p.mem_mb), Style::new().fg(cyan())),
-            Span::styled(format!("{:>6.1} ", p.mem_pct), Style::new().fg(render::grade(p.mem_pct / 100.0, true))),
+            Span::styled(
+                format!("{:>6.1} ", p.mem_pct),
+                Style::new().fg(render::grade(p.mem_pct / 100.0, true)),
+            ),
         ]);
         let base = if selected {
             Style::new().bg(Color::Rgb(0x10, 0x2a, 0x22))
@@ -1313,8 +1592,14 @@ fn lighting_panel(app: &App, s: &Snapshot) -> Paragraph<'static> {
         Some(3) => "high",
         _ => "n/a",
     };
-    let b = s.kbd_brightness.map(|v| v.to_string()).unwrap_or_else(|| "—".into());
-    let mode = app.aura_mode.map(crate::control::aura_mode_name).unwrap_or("n/a");
+    let b = s
+        .kbd_brightness
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "—".into());
+    let mode = app
+        .aura_mode
+        .map(crate::control::aura_mode_name)
+        .unwrap_or("n/a");
     let supported: String = app
         .aura_supported
         .iter()
@@ -1331,17 +1616,32 @@ fn lighting_panel(app: &App, s: &Snapshot) -> Paragraph<'static> {
     let mut lines = vec![
         row("keyboard backlight", format!("{word} ({b})"), cyan()),
         row("aura mode", mode.to_string(), magenta()),
-        row("supported modes", if supported.is_empty() { "n/a".into() } else { supported }, text()),
+        row(
+            "supported modes",
+            if supported.is_empty() {
+                "n/a".into()
+            } else {
+                supported
+            },
+            text(),
+        ),
         row(
             "backend",
-            if app.control_available { "asusd (xyz.ljones.Asusd)".into() } else { "unreachable".into() },
+            if app.control_available {
+                "asusd (xyz.ljones.Asusd)".into()
+            } else {
+                "unreachable".into()
+            },
             if app.control_available { neon() } else { red() },
         ),
         row("theme", crate::theme::current().label.to_string(), neon()),
         Line::from(""),
     ];
     let key = |k: &'static str, d: &'static str| {
-        Line::from(vec![Span::styled(k, Style::new().fg(neon())), Span::styled(d, Style::new().fg(dim()))])
+        Line::from(vec![
+            Span::styled(k, Style::new().fg(neon())),
+            Span::styled(d, Style::new().fg(dim())),
+        ])
     };
     lines.push(key("+ / -   ", "brightness up / down"));
     lines.push(key("m       ", "cycle aura effect"));
@@ -1352,7 +1652,11 @@ fn lighting_panel(app: &App, s: &Snapshot) -> Paragraph<'static> {
 fn draw_network(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(15), Constraint::Length(8), Constraint::Min(6)])
+        .constraints([
+            Constraint::Length(15),
+            Constraint::Length(8),
+            Constraint::Min(6),
+        ])
         .split(area);
     frame.render_widget(
         render::bandwidth_graph_panel(
@@ -1370,8 +1674,17 @@ fn draw_network(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 fn draw_placeholder(frame: &mut Frame, area: Rect) {
     let body = vec![
         Line::from(""),
-        Line::styled("  Processes tab arrives in Phase C.", Style::new().fg(amber())),
-        Line::styled("  Interactive table: sort / filter / select / kill, plus GPU compute apps.", Style::new().fg(dim())),
+        Line::styled(
+            "  Processes tab arrives in Phase C.",
+            Style::new().fg(amber()),
+        ),
+        Line::styled(
+            "  Interactive table: sort / filter / select / kill, plus GPU compute apps.",
+            Style::new().fg(dim()),
+        ),
     ];
-    frame.render_widget(Paragraph::new(body).block(Block::bordered().border_style(Style::new().fg(cyan()))), area);
+    frame.render_widget(
+        Paragraph::new(body).block(Block::bordered().border_style(Style::new().fg(cyan()))),
+        area,
+    );
 }

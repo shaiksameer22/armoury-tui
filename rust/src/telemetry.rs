@@ -82,7 +82,7 @@ pub struct BatterySample {
     pub rate_w: Option<f64>, // signed: + charging, - discharging
     pub charge_limit: Option<i64>,
     pub ac_online: Option<bool>,
-    pub health_pct: Option<f64>,    // full / design capacity
+    pub health_pct: Option<f64>, // full / design capacity
     pub cycle_count: Option<i64>,
     pub time_to_empty_s: Option<i64>,
     pub time_to_full_s: Option<i64>,
@@ -164,13 +164,23 @@ pub fn kill_process(pid: u32, force: bool) -> (bool, String) {
     let own = std::process::id();
     let parent = nix::unistd::getppid().as_raw() as u32;
     if pid == 1 || pid == own || pid == parent {
-        return (false, format!("refusing to kill critical/own process {pid}"));
+        return (
+            false,
+            format!("refusing to kill critical/own process {pid}"),
+        );
     }
-    let sig = if force { Signal::SIGKILL } else { Signal::SIGTERM };
+    let sig = if force {
+        Signal::SIGKILL
+    } else {
+        Signal::SIGTERM
+    };
     match kill(Pid::from_raw(pid as i32), sig) {
         Ok(()) => (true, format!("sent {sig:?} → {pid}")),
         Err(nix::errno::Errno::ESRCH) => (false, format!("process {pid} is already gone")),
-        Err(nix::errno::Errno::EPERM) => (false, format!("permission denied for {pid} — likely root-owned")),
+        Err(nix::errno::Errno::EPERM) => (
+            false,
+            format!("permission denied for {pid} — likely root-owned"),
+        ),
         Err(e) => (false, format!("failed to signal {pid}: {e}")),
     }
 }
@@ -240,7 +250,9 @@ impl Telemetry {
 
     /// Open a system-bus connection and find the battery device path once.
     fn resolve_upower(&mut self) {
-        let Ok(conn) = zbus::blocking::Connection::system() else { return };
+        let Ok(conn) = zbus::blocking::Connection::system() else {
+            return;
+        };
         let devices: Vec<zbus::zvariant::OwnedObjectPath> = zbus::blocking::Proxy::new(
             &conn,
             "org.freedesktop.UPower",
@@ -276,8 +288,18 @@ impl Telemetry {
 
     fn cpu(&mut self) -> CpuSample {
         self.sys.refresh_cpu_all();
-        let per_core: Vec<f64> = self.sys.cpus().iter().map(|c| c.cpu_usage() as f64).collect();
-        let freqs_mhz: Vec<f64> = self.sys.cpus().iter().map(|c| c.frequency() as f64).collect();
+        let per_core: Vec<f64> = self
+            .sys
+            .cpus()
+            .iter()
+            .map(|c| c.cpu_usage() as f64)
+            .collect();
+        let freqs_mhz: Vec<f64> = self
+            .sys
+            .cpus()
+            .iter()
+            .map(|c| c.frequency() as f64)
+            .collect();
         let overall = if per_core.is_empty() {
             0.0
         } else {
@@ -291,7 +313,11 @@ impl Telemetry {
                 None
             }
         };
-        let temp = self.hw.cpu_temp.as_ref().and_then(|c| sysfs::read_milli(&c.path));
+        let temp = self
+            .hw
+            .cpu_temp
+            .as_ref()
+            .and_then(|c| sysfs::read_milli(&c.path));
         CpuSample {
             cores: per_core.len(),
             per_core,
@@ -322,7 +348,11 @@ impl Telemetry {
 
     fn gpu_nvidia(&self, nvml: &Nvml) -> GpuSample {
         let Ok(dev) = nvml.device_by_index(0) else {
-            return GpuSample { present: false, vendor: "nvidia".into(), ..Default::default() };
+            return GpuSample {
+                present: false,
+                vendor: "nvidia".into(),
+                ..Default::default()
+            };
         };
         let mem = dev.memory_info().ok();
         GpuSample {
@@ -332,7 +362,10 @@ impl Telemetry {
             util: dev.utilization_rates().ok().map(|u| u.gpu as f64),
             mem_used_mb: mem.as_ref().map(|m| m.used as f64 / 1_048_576.0),
             mem_total_mb: mem.as_ref().map(|m| m.total as f64 / 1_048_576.0),
-            temp_c: dev.temperature(TemperatureSensor::Gpu).ok().map(|t| t as f64),
+            temp_c: dev
+                .temperature(TemperatureSensor::Gpu)
+                .ok()
+                .map(|t| t as f64),
             power_w: dev.power_usage().ok().map(|mw| mw as f64 / 1000.0),
             clock_mhz: dev.clock_info(Clock::Graphics).ok().map(|c| c as f64),
             fan_pct: dev.fan_speed(0).ok().map(|f| f as f64),
@@ -345,7 +378,12 @@ impl Telemetry {
         self.hw
             .fans
             .iter()
-            .filter_map(|f| sysfs::read_int(&f.path).map(|rpm| FanSample { label: f.label.clone(), rpm }))
+            .filter_map(|f| {
+                sysfs::read_int(&f.path).map(|rpm| FanSample {
+                    label: f.label.clone(),
+                    rpm,
+                })
+            })
             .collect()
     }
 
@@ -355,7 +393,11 @@ impl Telemetry {
         self.sys.refresh_memory();
         let total = self.sys.total_memory();
         let used = self.sys.used_memory();
-        let percent = if total > 0 { used as f64 / total as f64 * 100.0 } else { 0.0 };
+        let percent = if total > 0 {
+            used as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
         MemSample {
             used,
             total,
@@ -368,7 +410,11 @@ impl Telemetry {
     // -- storage ----------------------------------------------------------
 
     fn storage(&self) -> StorageSample {
-        let temp = self.hw.nvme_temp.as_ref().and_then(|c| sysfs::read_milli(&c.path));
+        let temp = self
+            .hw
+            .nvme_temp
+            .as_ref()
+            .and_then(|c| sysfs::read_milli(&c.path));
         let disks = sysinfo::Disks::new_with_refreshed_list();
         let mut root_used = 0;
         let mut root_total = 0;
@@ -379,7 +425,11 @@ impl Telemetry {
                 break;
             }
         }
-        let pct = if root_total > 0 { root_used as f64 / root_total as f64 * 100.0 } else { 0.0 };
+        let pct = if root_total > 0 {
+            root_used as f64 / root_total as f64 * 100.0
+        } else {
+            0.0
+        };
         StorageSample {
             nvme_temp_c: temp,
             root_used,
@@ -424,14 +474,23 @@ impl Telemetry {
 
     /// UPower TimeToEmpty / TimeToFull in seconds (0 → unknown → None).
     fn upower_times(&self) -> (Option<i64>, Option<i64>) {
-        let (Some(conn), Some(path)) = (self.upower_conn.as_ref(), self.upower_path.as_ref()) else {
+        let (Some(conn), Some(path)) = (self.upower_conn.as_ref(), self.upower_path.as_ref())
+        else {
             return (None, None);
         };
-        let Ok(proxy) = zbus::blocking::Proxy::new(conn, "org.freedesktop.UPower", path.as_str(), "org.freedesktop.UPower.Device") else {
+        let Ok(proxy) = zbus::blocking::Proxy::new(
+            conn,
+            "org.freedesktop.UPower",
+            path.as_str(),
+            "org.freedesktop.UPower.Device",
+        ) else {
             return (None, None);
         };
         let pos = |v: zbus::Result<i64>| v.ok().filter(|&s| s > 0);
-        (pos(proxy.get_property("TimeToEmpty")), pos(proxy.get_property("TimeToFull")))
+        (
+            pos(proxy.get_property("TimeToEmpty")),
+            pos(proxy.get_property("TimeToFull")),
+        )
     }
 
     /// Signed power flow in watts (+ charging, - discharging). Prefers UPower's
@@ -446,7 +505,11 @@ impl Telemetry {
                 Some(i.unsigned_abs() as f64 * v.unsigned_abs() as f64 / 1e12)
             }
         })?;
-        Some(if status.to_lowercase().starts_with("dis") { -mag } else { mag })
+        Some(if status.to_lowercase().starts_with("dis") {
+            -mag
+        } else {
+            mag
+        })
     }
 
     // -- network ----------------------------------------------------------
@@ -462,27 +525,38 @@ impl Telemetry {
             }
         }
 
-        let dt = self.prev_net_ts.map(|t| now.duration_since(t).as_secs_f64());
+        let dt = self
+            .prev_net_ts
+            .map(|t| now.duration_since(t).as_secs_f64());
         let mut result: Vec<NetIface> = Vec::new();
         for dir in sysfs::list_dir("/sys/class/net") {
-            let Some(name) = dir.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()) else {
+            let Some(name) = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+            else {
                 continue;
             };
             let stats = dir.join("statistics");
             let rx = sysfs::read_int(stats.join("rx_bytes")).unwrap_or(0) as u64;
             let tx = sysfs::read_int(stats.join("tx_bytes")).unwrap_or(0) as u64;
             let (up, down) = match (self.prev_net.get(&name), dt) {
-                (Some(&(ptx, prx)), Some(dt)) if dt > 0.0 => {
-                    (tx.saturating_sub(ptx) as f64 / dt, rx.saturating_sub(prx) as f64 / dt)
-                }
+                (Some(&(ptx, prx)), Some(dt)) if dt > 0.0 => (
+                    tx.saturating_sub(ptx) as f64 / dt,
+                    rx.saturating_sub(prx) as f64 / dt,
+                ),
                 _ => (0.0, 0.0),
             };
             self.prev_net.insert(name.clone(), (tx, rx));
 
             // Match psutil's is_up: the IFF_UP flag (0x1), not operstate — some
             // NICs (e.g. USB ethernet) report operstate "unknown" while up.
-            let is_up = sysfs::read_int(dir.join("flags")).map(|f| f & 0x1 != 0).unwrap_or(false);
-            let speed = sysfs::read_int(dir.join("speed")).filter(|&s| s > 0).unwrap_or(0);
+            let is_up = sysfs::read_int(dir.join("flags"))
+                .map(|f| f & 0x1 != 0)
+                .unwrap_or(false);
+            let speed = sysfs::read_int(dir.join("speed"))
+                .filter(|&s| s > 0)
+                .unwrap_or(0);
             let is_virtual = VIRTUAL_IFACE.iter().any(|p| name.starts_with(p));
             result.push(NetIface {
                 up_bps: up,
@@ -534,10 +608,18 @@ impl Telemetry {
             .collect();
 
         let mut by_cpu = rows.clone();
-        by_cpu.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal));
+        by_cpu.sort_by(|a, b| {
+            b.cpu
+                .partial_cmp(&a.cpu)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         by_cpu.truncate(7);
         let mut by_mem = rows.clone();
-        by_mem.sort_by(|a, b| b.mem_mb.partial_cmp(&a.mem_mb).unwrap_or(std::cmp::Ordering::Equal));
+        by_mem.sort_by(|a, b| {
+            b.mem_mb
+                .partial_cmp(&a.mem_mb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         by_mem.truncate(7);
         rows.shrink_to_fit();
         (by_cpu, by_mem, rows)
@@ -546,7 +628,8 @@ impl Telemetry {
     /// Best-effort detail bundle for one process (each field guarded).
     pub fn process_detail(&mut self, pid: u32) -> Option<ProcDetail> {
         let spid = sysinfo::Pid::from_u32(pid);
-        self.sys.refresh_processes(ProcessesToUpdate::Some(&[spid]), false);
+        self.sys
+            .refresh_processes(ProcessesToUpdate::Some(&[spid]), false);
         let users = sysinfo::Users::new_with_refreshed_list();
         let p = self.sys.process(spid)?;
         let user = p
@@ -591,26 +674,52 @@ impl Telemetry {
             }
         }
         let mut out: Vec<NetConn> = Vec::new();
-        let mut push = |proto: &'static str, laddr: String, raddr: String, status: String, inode: u64| {
-            let (pid, pname) = match owner.get(&inode) {
-                Some((pid, name)) => (Some(*pid), name.clone()),
-                None => (None, "—".into()),
+        let mut push =
+            |proto: &'static str, laddr: String, raddr: String, status: String, inode: u64| {
+                let (pid, pname) = match owner.get(&inode) {
+                    Some((pid, name)) => (Some(*pid), name.clone()),
+                    None => (None, "—".into()),
+                };
+                out.push(NetConn {
+                    proto,
+                    laddr,
+                    raddr,
+                    status,
+                    pname,
+                    pid,
+                });
             };
-            out.push(NetConn { proto, laddr, raddr, status, pname, pid });
-        };
         if let Ok(t) = procfs::net::tcp() {
             for e in t {
-                push("tcp", e.local_address.to_string(), e.remote_address.to_string(), format!("{:?}", e.state).to_uppercase(), e.inode);
+                push(
+                    "tcp",
+                    e.local_address.to_string(),
+                    e.remote_address.to_string(),
+                    format!("{:?}", e.state).to_uppercase(),
+                    e.inode,
+                );
             }
         }
         if let Ok(t) = procfs::net::tcp6() {
             for e in t {
-                push("tcp6", e.local_address.to_string(), e.remote_address.to_string(), format!("{:?}", e.state).to_uppercase(), e.inode);
+                push(
+                    "tcp6",
+                    e.local_address.to_string(),
+                    e.remote_address.to_string(),
+                    format!("{:?}", e.state).to_uppercase(),
+                    e.inode,
+                );
             }
         }
         if let Ok(u) = procfs::net::udp() {
             for e in u {
-                push("udp", e.local_address.to_string(), e.remote_address.to_string(), "-".into(), e.inode);
+                push(
+                    "udp",
+                    e.local_address.to_string(),
+                    e.remote_address.to_string(),
+                    "-".into(),
+                    e.inode,
+                );
             }
         }
         let rank = |s: &str| match s {
@@ -624,9 +733,15 @@ impl Telemetry {
     }
 
     fn gpu_processes(&self) -> Vec<GpuProc> {
-        let Some(nvml) = &self.nvml else { return Vec::new() };
-        let Ok(dev) = nvml.device_by_index(0) else { return Vec::new() };
-        let Ok(procs) = dev.running_compute_processes() else { return Vec::new() };
+        let Some(nvml) = &self.nvml else {
+            return Vec::new();
+        };
+        let Ok(dev) = nvml.device_by_index(0) else {
+            return Vec::new();
+        };
+        let Ok(procs) = dev.running_compute_processes() else {
+            return Vec::new();
+        };
         let mut out: Vec<GpuProc> = procs
             .into_iter()
             .map(|p| {
@@ -639,10 +754,18 @@ impl Telemetry {
                     .process(sysinfo::Pid::from_u32(p.pid))
                     .map(|pr| pr.name().to_string_lossy().to_string())
                     .unwrap_or_else(|| "?".into());
-                GpuProc { pid: p.pid, name, mem_mb }
+                GpuProc {
+                    pid: p.pid,
+                    name,
+                    mem_mb,
+                }
             })
             .collect();
-        out.sort_by(|a, b| b.mem_mb.partial_cmp(&a.mem_mb).unwrap_or(std::cmp::Ordering::Equal));
+        out.sort_by(|a, b| {
+            b.mem_mb
+                .partial_cmp(&a.mem_mb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         out
     }
 
@@ -771,18 +894,25 @@ pub fn once() -> Result<()> {
     }
     let b = &s.battery;
     if b.present {
-        let rate = b.rate_w.map(|r| format!("{:+.1}W", r)).unwrap_or_else(|| "n/a".into());
+        let rate = b
+            .rate_w
+            .map(|r| format!("{:+.1}W", r))
+            .unwrap_or_else(|| "n/a".into());
         println!(
             "battery     : {:.0}%  {}  rate={}  limit={}%",
             b.percent.unwrap_or(0.0),
             b.status,
             rate,
-            b.charge_limit.map(|l| l.to_string()).unwrap_or_else(|| "None".into())
+            b.charge_limit
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "None".into())
         );
     }
     println!(
         "kbd light   : {}",
-        s.kbd_brightness.map(|v| v.to_string()).unwrap_or_else(|| "None".into())
+        s.kbd_brightness
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "None".into())
     );
     for i in &s.net {
         if i.is_up && !i.is_virtual {
@@ -871,7 +1001,8 @@ pub fn json() -> Result<()> {
 
 /// `--replay`: summarise a `--log` CSV (per-metric min/avg/max + a sparkline).
 pub fn replay(path: &str) -> Result<()> {
-    let text = std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read {path}: {e}"))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("cannot read {path}: {e}"))?;
     let mut lines = text.lines();
     let cols: Vec<&str> = lines.next().unwrap_or_default().split(',').collect();
     let idx = |name: &str| cols.iter().position(|c| *c == name);
@@ -920,7 +1051,10 @@ pub fn replay(path: &str) -> Result<()> {
         let mn = v.iter().cloned().fold(f64::INFINITY, f64::min);
         let mx = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let avg = v.iter().sum::<f64>() / v.len() as f64;
-        println!("  {label:<9} min {mn:>5.0} avg {avg:>5.0} max {mx:>5.0} {unit}  {}", spark(v));
+        println!(
+            "  {label:<9} min {mn:>5.0} avg {avg:>5.0} max {mx:>5.0} {unit}  {}",
+            spark(v)
+        );
     }
     Ok(())
 }
@@ -929,7 +1063,11 @@ fn spark(v: &[f64]) -> String {
     const B: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
     let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let span = if (hi - lo).abs() < f64::EPSILON { 1.0 } else { hi - lo };
+    let span = if (hi - lo).abs() < f64::EPSILON {
+        1.0
+    } else {
+        hi - lo
+    };
     let step = (v.len() as f64 / 50.0).max(1.0);
     let mut out = String::new();
     let mut i = 0.0;
@@ -1064,6 +1202,10 @@ mod tests {
         let (ok, msg) = kill_process(99_999_999, false);
         assert!(!ok);
         // Should report "already gone" (ESRCH) or "permission denied" (EPERM)
-        assert!(msg.contains("already gone") || msg.contains("permission denied") || msg.contains("failed"));
+        assert!(
+            msg.contains("already gone")
+                || msg.contains("permission denied")
+                || msg.contains("failed")
+        );
     }
 }

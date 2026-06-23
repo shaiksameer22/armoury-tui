@@ -51,11 +51,29 @@ impl Default for Config {
             batt_low_pct: 15.0,
             fan_stall_temp: 75.0,
             presets: vec![
-                Preset { name: "Travel".into(), profile: Some("Quiet".into()), charge_limit: Some(60), brightness: Some(1) },
-                Preset { name: "Balanced".into(), profile: Some("Balanced".into()), charge_limit: Some(80), brightness: Some(2) },
-                Preset { name: "Gaming".into(), profile: Some("Performance".into()), charge_limit: Some(100), brightness: Some(3) },
+                Preset {
+                    name: "Travel".into(),
+                    profile: Some("Quiet".into()),
+                    charge_limit: Some(60),
+                    brightness: Some(1),
+                },
+                Preset {
+                    name: "Balanced".into(),
+                    profile: Some("Balanced".into()),
+                    charge_limit: Some(80),
+                    brightness: Some(2),
+                },
+                Preset {
+                    name: "Gaming".into(),
+                    profile: Some("Performance".into()),
+                    charge_limit: Some(100),
+                    brightness: Some(3),
+                },
             ],
-            rules: vec![Rule { battery_below: 20, preset: "Travel".into() }],
+            rules: vec![Rule {
+                battery_below: 20,
+                preset: "Travel".into(),
+            }],
         }
     }
 }
@@ -70,7 +88,9 @@ pub fn path() -> Option<PathBuf> {
 impl Config {
     /// Load config, writing a default starter file if none exists.
     pub fn load() -> Config {
-        let Some(p) = path() else { return Config::default() };
+        let Some(p) = path() else {
+            return Config::default();
+        };
         match std::fs::read_to_string(&p) {
             Ok(s) => toml::from_str(&s).unwrap_or_default(),
             Err(_) => {

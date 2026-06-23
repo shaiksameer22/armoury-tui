@@ -21,10 +21,16 @@ pub struct ControlResult {
 
 impl ControlResult {
     fn ok(msg: impl Into<String>) -> Self {
-        ControlResult { ok: true, message: msg.into() }
+        ControlResult {
+            ok: true,
+            message: msg.into(),
+        }
     }
     fn err(msg: impl Into<String>) -> Self {
-        ControlResult { ok: false, message: msg.into() }
+        ControlResult {
+            ok: false,
+            message: msg.into(),
+        }
     }
 }
 
@@ -33,15 +39,18 @@ impl ControlResult {
 pub struct FanCurve {
     #[allow(dead_code)] // which profile the curve belongs to; kept for the data model
     pub profile: String,
-    pub fan: String,              // "CPU" | "GPU" | …
-    pub points: Vec<(u8, u8)>,    // (temp °C, pwm 0-255), low→high
+    pub fan: String,           // "CPU" | "GPU" | …
+    pub points: Vec<(u8, u8)>, // (temp °C, pwm 0-255), low→high
     pub enabled: bool,
 }
 
 impl FanCurve {
     /// PWM duty as 0-100% per point.
     pub fn pwm_pcts(&self) -> Vec<i32> {
-        self.points.iter().map(|&(_, p)| (p as f64 / 255.0 * 100.0).round() as i32).collect()
+        self.points
+            .iter()
+            .map(|&(_, p)| (p as f64 / 255.0 * 100.0).round() as i32)
+            .collect()
     }
 }
 
@@ -73,7 +82,9 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(_hw: &HardwareMap) -> Self {
-        Controller { bus: Bus::connect().ok() }
+        Controller {
+            bus: Bus::connect().ok(),
+        }
     }
 
     pub fn available(&self) -> bool {
@@ -81,7 +92,9 @@ impl Controller {
     }
 
     fn bus(&self) -> Result<&Bus, ControlResult> {
-        self.bus.as_ref().ok_or_else(|| ControlResult::err("asusd not reachable (xyz.ljones.Asusd)"))
+        self.bus
+            .as_ref()
+            .ok_or_else(|| ControlResult::err("asusd not reachable (xyz.ljones.Asusd)"))
     }
 
     // -- power profiles ---------------------------------------------------
@@ -98,7 +111,11 @@ impl Controller {
         let order = ["Quiet", "Balanced", "Performance"];
         let avail: Vec<String> = order
             .iter()
-            .filter(|n| profile_int(n).map(|i| supported.contains(&i)).unwrap_or(false))
+            .filter(|n| {
+                profile_int(n)
+                    .map(|i| supported.contains(&i))
+                    .unwrap_or(false)
+            })
             .map(|n| n.to_string())
             .collect();
         if avail.is_empty() {
@@ -116,7 +133,10 @@ impl Controller {
         let Some(i) = profile_int(name) else {
             return ControlResult::err(format!("unknown profile '{name}'"));
         };
-        match bus.platform().and_then(|p| p.set_property("PlatformProfile", i).map_err(Into::into)) {
+        match bus
+            .platform()
+            .and_then(|p| p.set_property("PlatformProfile", i).map_err(Into::into))
+        {
             Ok(()) => ControlResult::ok(format!("profile → {name}")),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -130,7 +150,10 @@ impl Controller {
             Err(e) => return e,
         };
         let pct = percent.clamp(20, 100) as u8;
-        match bus.platform().and_then(|p| p.set_property("ChargeControlEndThreshold", pct).map_err(Into::into)) {
+        match bus.platform().and_then(|p| {
+            p.set_property("ChargeControlEndThreshold", pct)
+                .map_err(Into::into)
+        }) {
             Ok(()) => ControlResult::ok(format!("charge limit → {pct}%")),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -142,7 +165,11 @@ impl Controller {
             Ok(b) => b,
             Err(e) => return e,
         };
-        match bus.platform().and_then(|p| p.call_method("OneShotFullCharge", &()).map(|_| ()).map_err(Into::into)) {
+        match bus.platform().and_then(|p| {
+            p.call_method("OneShotFullCharge", &())
+                .map(|_| ())
+                .map_err(Into::into)
+        }) {
             Ok(()) => ControlResult::ok("one-shot full charge armed"),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -167,9 +194,20 @@ impl Controller {
             Ok(b) => b,
             Err(e) => return e,
         };
-        let prop = if on_ac { "ChangePlatformProfileOnAc" } else { "ChangePlatformProfileOnBattery" };
-        match bus.platform().and_then(|p| p.set_property(prop, enabled).map_err(Into::into)) {
-            Ok(()) => ControlResult::ok(format!("auto profile on {} → {}", if on_ac { "AC" } else { "battery" }, if enabled { "on" } else { "off" })),
+        let prop = if on_ac {
+            "ChangePlatformProfileOnAc"
+        } else {
+            "ChangePlatformProfileOnBattery"
+        };
+        match bus
+            .platform()
+            .and_then(|p| p.set_property(prop, enabled).map_err(Into::into))
+        {
+            Ok(()) => ControlResult::ok(format!(
+                "auto profile on {} → {}",
+                if on_ac { "AC" } else { "battery" },
+                if enabled { "on" } else { "off" }
+            )),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
     }
@@ -218,7 +256,10 @@ impl Controller {
             Err(e) => return e,
         };
         let lvl = level.clamp(0, 3) as u32;
-        match bus.aura().and_then(|p| p.set_property("Brightness", lvl).map_err(Into::into)) {
+        match bus
+            .aura()
+            .and_then(|p| p.set_property("Brightness", lvl).map_err(Into::into))
+        {
             Ok(()) => ControlResult::ok(format!("brightness → {lvl}")),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -236,7 +277,12 @@ impl Controller {
     }
 
     pub fn current_aura_mode(&self) -> Option<u32> {
-        self.bus.as_ref()?.aura().ok()?.get_property::<u32>("LedMode").ok()
+        self.bus
+            .as_ref()?
+            .aura()
+            .ok()?
+            .get_property::<u32>("LedMode")
+            .ok()
     }
 
     /// Set the LED effect mode (uses the colours already stored in asusd).
@@ -246,7 +292,10 @@ impl Controller {
             Ok(b) => b,
             Err(e) => return e,
         };
-        match bus.aura().and_then(|p| p.set_property("LedMode", mode).map_err(Into::into)) {
+        match bus
+            .aura()
+            .and_then(|p| p.set_property("LedMode", mode).map_err(Into::into))
+        {
             Ok(()) => ControlResult::ok(format!("aura mode → {}", aura_mode_name(mode))),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -254,13 +303,23 @@ impl Controller {
 
     /// Apply a full LED effect: mode + primary/secondary colour + speed + direction
     /// via the `LedModeData` tuple `(mode, zone, rgb, rgb, speed, dir)`.
-    pub fn set_aura_full(&self, mode: u32, c1: (u8, u8, u8), c2: (u8, u8, u8), speed: &str, dir: &str) -> ControlResult {
+    pub fn set_aura_full(
+        &self,
+        mode: u32,
+        c1: (u8, u8, u8),
+        c2: (u8, u8, u8),
+        speed: &str,
+        dir: &str,
+    ) -> ControlResult {
         let bus = match self.bus() {
             Ok(b) => b,
             Err(e) => return e,
         };
         let data = (mode, 0u32, c1, c2, speed.to_string(), dir.to_string());
-        match bus.aura().and_then(|p| p.set_property("LedModeData", data).map_err(Into::into)) {
+        match bus
+            .aura()
+            .and_then(|p| p.set_property("LedModeData", data).map_err(Into::into))
+        {
             Ok(()) => ControlResult::ok(format!("aura {} applied", aura_mode_name(mode))),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -276,16 +335,27 @@ impl Controller {
             return ControlResult::err("no aura modes on this keyboard");
         }
         let cur = self.current_aura_mode().unwrap_or(modes[0]);
-        let next = modes.iter().position(|&m| m == cur).map(|i| (i + 1) % modes.len()).unwrap_or(0);
+        let next = modes
+            .iter()
+            .position(|&m| m == cur)
+            .map(|i| (i + 1) % modes.len())
+            .unwrap_or(0);
         self.set_aura_mode(modes[next])
     }
 
     // -- fan curves -------------------------------------------------------
 
     pub fn get_fan_curves(&self, profile: &str) -> Vec<FanCurve> {
-        let Ok(bus) = self.bus() else { return Vec::new() };
-        let Some(i) = profile_int(profile) else { return Vec::new() };
-        let raw: Vec<RawCurve> = match bus.fancurves().and_then(|p| p.call("FanCurveData", &(i,)).map_err(Into::into)) {
+        let Ok(bus) = self.bus() else {
+            return Vec::new();
+        };
+        let Some(i) = profile_int(profile) else {
+            return Vec::new();
+        };
+        let raw: Vec<RawCurve> = match bus
+            .fancurves()
+            .and_then(|p| p.call("FanCurveData", &(i,)).map_err(Into::into))
+        {
             Ok(v) => v,
             Err(_) => return Vec::new(),
         };
@@ -310,7 +380,11 @@ impl Controller {
         let temps = unzip8(curve.points.iter().map(|&(t, _)| t));
         let pwms = unzip8(curve.points.iter().map(|&(_, p)| p));
         let raw: RawCurve = (curve.fan.to_lowercase(), temps, pwms, true);
-        match bus.fancurves().and_then(|p| p.call_method("SetFanCurve", &(i, raw)).map(|_| ()).map_err(Into::into)) {
+        match bus.fancurves().and_then(|p| {
+            p.call_method("SetFanCurve", &(i, raw))
+                .map(|_| ())
+                .map_err(Into::into)
+        }) {
             Ok(()) => ControlResult::ok(format!("{} curve set on {profile}", curve.fan)),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -324,8 +398,15 @@ impl Controller {
         let Some(i) = profile_int(profile) else {
             return ControlResult::err(format!("unknown profile '{profile}'"));
         };
-        match bus.fancurves().and_then(|p| p.call_method("SetFanCurvesEnabled", &(i, enabled)).map(|_| ()).map_err(Into::into)) {
-            Ok(()) => ControlResult::ok(format!("{profile} curves {}", if enabled { "enabled" } else { "disabled" })),
+        match bus.fancurves().and_then(|p| {
+            p.call_method("SetFanCurvesEnabled", &(i, enabled))
+                .map(|_| ())
+                .map_err(Into::into)
+        }) {
+            Ok(()) => ControlResult::ok(format!(
+                "{profile} curves {}",
+                if enabled { "enabled" } else { "disabled" }
+            )),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
     }
@@ -338,7 +419,11 @@ impl Controller {
         let Some(i) = profile_int(profile) else {
             return ControlResult::err(format!("unknown profile '{profile}'"));
         };
-        match bus.fancurves().and_then(|p| p.call_method("SetCurvesToDefaults", &(i,)).map(|_| ()).map_err(Into::into)) {
+        match bus.fancurves().and_then(|p| {
+            p.call_method("SetCurvesToDefaults", &(i,))
+                .map(|_| ())
+                .map_err(Into::into)
+        }) {
             Ok(()) => ControlResult::ok(format!("{profile} curves reset to default")),
             Err(e) => ControlResult::err(first_line(&e.to_string())),
         }
@@ -418,15 +503,30 @@ mod tests {
         assert!(profs.contains(&"Balanced".to_string()));
         for p in &profs {
             let curves = c.get_fan_curves(p);
-            eprintln!("{p}: {} fan curve(s): {:?}", curves.len(),
-                      curves.iter().map(|c| (c.fan.clone(), c.enabled, c.pwm_pcts())).collect::<Vec<_>>());
+            eprintln!(
+                "{p}: {} fan curve(s): {:?}",
+                curves.len(),
+                curves
+                    .iter()
+                    .map(|c| (c.fan.clone(), c.enabled, c.pwm_pcts()))
+                    .collect::<Vec<_>>()
+            );
         }
-        eprintln!("aura modes = {:?}, current = {:?}", c.supported_aura_modes(), c.current_aura_mode());
+        eprintln!(
+            "aura modes = {:?}, current = {:?}",
+            c.supported_aura_modes(),
+            c.current_aura_mode()
+        );
     }
 
     #[test]
     fn curve_pcts() {
-        let c = FanCurve { profile: "Performance".into(), fan: "CPU".into(), points: vec![(30, 0), (60, 128), (90, 255)], enabled: true };
+        let c = FanCurve {
+            profile: "Performance".into(),
+            fan: "CPU".into(),
+            points: vec![(30, 0), (60, 128), (90, 255)],
+            enabled: true,
+        };
         assert_eq!(c.pwm_pcts(), vec![0, 50, 100]);
     }
 
@@ -502,6 +602,9 @@ mod tests {
 
     #[test]
     fn test_profile_roundtrip_lowpower() {
-        assert_eq!(profile_name(profile_int("LowPower").unwrap()), Some("LowPower"));
+        assert_eq!(
+            profile_name(profile_int("LowPower").unwrap()),
+            Some("LowPower")
+        );
     }
 }

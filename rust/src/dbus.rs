@@ -51,7 +51,10 @@ impl Bus {
     }
 
     pub fn aura(&self) -> Result<Proxy<'_>> {
-        let path = self.aura_path.clone().ok_or_else(|| anyhow!("no Aura device on this machine"))?;
+        let path = self
+            .aura_path
+            .clone()
+            .ok_or_else(|| anyhow!("no Aura device on this machine"))?;
         self.proxy(path, AURA)
     }
 }
@@ -60,7 +63,13 @@ impl Bus {
 /// is device-specific (`tuf`, `rog`, a board id, …), so we discover rather than
 /// hardcode it.
 fn discover_aura(conn: &Connection) -> Option<String> {
-    let proxy = Proxy::new(conn, ASUSD, "/xyz/ljones/aura", "org.freedesktop.DBus.Introspectable").ok()?;
+    let proxy = Proxy::new(
+        conn,
+        ASUSD,
+        "/xyz/ljones/aura",
+        "org.freedesktop.DBus.Introspectable",
+    )
+    .ok()?;
     let xml: String = proxy.call("Introspect", &()).ok()?;
     let child = xml.split("<node name=\"").nth(1)?.split('"').next()?;
     if child.is_empty() {

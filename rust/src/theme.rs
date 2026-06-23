@@ -106,7 +106,10 @@ pub fn current_label() -> &'static str {
 
 /// Select a theme by label (case-insensitive); no-op if unknown.
 pub fn set_by_label(label: &str) {
-    if let Some(i) = THEMES.iter().position(|t| t.label.eq_ignore_ascii_case(label)) {
+    if let Some(i) = THEMES
+        .iter()
+        .position(|t| t.label.eq_ignore_ascii_case(label))
+    {
         IDX.store(i, Ordering::Relaxed);
     }
 }
@@ -201,6 +204,9 @@ mod tests {
     #[test]
     fn test_theme_labels() {
         let labels: Vec<&str> = THEMES.iter().map(|t| t.label).collect();
-        assert_eq!(labels, vec!["Cyberpunk", "Synthwave", "Matrix", "Amber CRT", "Ice"]);
+        assert_eq!(
+            labels,
+            vec!["Cyberpunk", "Synthwave", "Matrix", "Amber CRT", "Ice"]
+        );
     }
 }

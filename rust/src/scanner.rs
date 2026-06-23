@@ -103,12 +103,23 @@ impl HardwareMap {
             format!("kernel    : {}", self.kernel),
             format!(
                 "cpu temp  : {} ({})",
-                if self.cpu_chip.is_empty() { "?" } else { &self.cpu_chip },
+                if self.cpu_chip.is_empty() {
+                    "?"
+                } else {
+                    &self.cpu_chip
+                },
                 cpu_label
             ),
             format!("gpu       : {}", gpu),
             format!("fans      : {}", fans),
-            format!("nvme temp : {}", if self.nvme_temp.is_some() { "yes" } else { "no" }),
+            format!(
+                "nvme temp : {}",
+                if self.nvme_temp.is_some() {
+                    "yes"
+                } else {
+                    "no"
+                }
+            ),
             format!(
                 "battery   : {}",
                 self.battery
@@ -125,7 +136,10 @@ impl HardwareMap {
                     "n/a"
                 }
             ),
-            format!("asusctl   : {}   asusd: {}", self.has_asusctl, self.has_asusd),
+            format!(
+                "asusctl   : {}   asusd: {}",
+                self.has_asusctl, self.has_asusd
+            ),
             format!("profiles  : {}", self.has_platform_profile),
             format!(
                 "kbd led   : {} (max {})",
@@ -137,7 +151,8 @@ impl HardwareMap {
 
 fn detect_identity(hw: &mut HardwareMap) {
     hw.hostname = sysfs::read_text("/proc/sys/kernel/hostname").unwrap_or_default();
-    hw.product = sysfs::read_text("/sys/class/dmi/id/product_name").unwrap_or_else(|| "unknown".into());
+    hw.product =
+        sysfs::read_text("/sys/class/dmi/id/product_name").unwrap_or_else(|| "unknown".into());
     hw.board = sysfs::read_text("/sys/class/dmi/id/board_name").unwrap_or_default();
     hw.kernel = sysfs::read_text("/proc/sys/kernel/osrelease").unwrap_or_default();
     // PRETTY_NAME from /etc/os-release without a distro crate.
@@ -178,7 +193,9 @@ fn sibling(path: &Path, from: &str, to: &str) -> PathBuf {
 
 fn pick_cpu_temp(chips: &BTreeMap<String, PathBuf>) -> (String, Option<TempChannel>) {
     for chip in CPU_TEMP_CHIPS {
-        let Some(dir) = chips.get(*chip) else { continue };
+        let Some(dir) = chips.get(*chip) else {
+            continue;
+        };
         let chans = temp_channels(dir);
         if chans.is_empty() {
             continue;
@@ -253,11 +270,15 @@ pub fn scan() -> HardwareMap {
     let mut name_to_dir: BTreeMap<String, PathBuf> = BTreeMap::new();
     let mut cpu_chip_dirs: BTreeMap<String, PathBuf> = BTreeMap::new();
     for node in sysfs::glob_in(HWMON_ROOT, "hwmon", "") {
-        let Some(name) = sysfs::read_text(node.join("name")) else { continue };
+        let Some(name) = sysfs::read_text(node.join("name")) else {
+            continue;
+        };
         if name.is_empty() {
             continue;
         }
-        name_to_dir.entry(name.clone()).or_insert_with(|| node.clone());
+        name_to_dir
+            .entry(name.clone())
+            .or_insert_with(|| node.clone());
         hw.hwmon_by_name
             .entry(name.clone())
             .or_insert_with(|| node.to_string_lossy().to_string());
@@ -305,7 +326,8 @@ pub fn scan() -> HardwareMap {
     hw.has_platform_profile = Path::new(ACPI_PROFILE).exists();
     if Path::new(KBD_LED).exists() {
         hw.has_kbd_backlight = true;
-        hw.kbd_max_brightness = sysfs::read_int(Path::new(KBD_LED).join("max_brightness")).unwrap_or(0);
+        hw.kbd_max_brightness =
+            sysfs::read_int(Path::new(KBD_LED).join("max_brightness")).unwrap_or(0);
     }
 
     hw

@@ -42,12 +42,10 @@ fn test_version_contains_name_and_semver() {
         "--version stdout should contain 'armoury-tui', got: {stdout}"
     );
     // Expect at least a major.minor.patch pattern somewhere in the output.
-    let has_version = stdout
-        .split_whitespace()
-        .any(|w| {
-            let parts: Vec<&str> = w.split('.').collect();
-            parts.len() >= 2 && parts.iter().all(|p| p.parse::<u32>().is_ok())
-        });
+    let has_version = stdout.split_whitespace().any(|w| {
+        let parts: Vec<&str> = w.split('.').collect();
+        parts.len() >= 2 && parts.iter().all(|p| p.parse::<u32>().is_ok())
+    });
     assert!(
         has_version,
         "--version stdout should contain a version number (e.g. 1.0.0), got: {stdout}"
@@ -125,7 +123,9 @@ fn test_probe_contains_expected_fields() {
         .output()
         .expect("failed to run binary");
     let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
-    for field in &["host", "product", "kernel", "cpu temp", "gpu", "fans", "battery"] {
+    for field in &[
+        "host", "product", "kernel", "cpu temp", "gpu", "fans", "battery",
+    ] {
         assert!(
             stdout.contains(field),
             "--probe output should contain '{field}', got:\n{}",
@@ -224,10 +224,7 @@ fn test_json_cpu_load_is_non_negative() {
     let cpu_load = val["cpu_load"]
         .as_f64()
         .expect("cpu_load should be a number");
-    assert!(
-        cpu_load >= 0.0,
-        "cpu_load should be >= 0, got {cpu_load}"
-    );
+    assert!(cpu_load >= 0.0, "cpu_load should be >= 0, got {cpu_load}");
 }
 
 #[test]
