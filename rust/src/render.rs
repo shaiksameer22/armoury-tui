@@ -312,7 +312,7 @@ pub fn battery_panel(s: &Snapshot) -> Paragraph<'static> {
         hl.push(Span::styled(format!("{:<9}", "health"), Style::new().fg(dim())));
         hl.push(Span::styled(format!("{h:.0}%  "), Style::new().fg(hcol)));
     }
-    if let Some(c) = b.cycle_count.filter(|&c| c > 0) {
+    if let Some(c) = b.cycle_count.filter(|&c| c >= 0) {
         hl.push(Span::styled(format!("{:<8}", "cycles"), Style::new().fg(dim())));
         hl.push(Span::styled(format!("{c}"), Style::new().fg(text())));
     }

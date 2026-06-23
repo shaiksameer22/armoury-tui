@@ -362,9 +362,16 @@ pub fn aura_mode_name(mode: u32) -> &'static str {
     match mode {
         0 => "static",
         1 => "breathe",
-        2 => "pulse",
+        2 => "color-cycle",
         3 => "rainbow",
+        4 => "star",
+        5 => "rain",
         6 => "highlight",
+        7 => "laser",
+        8 => "ripple",
+        9 => "comet",
+        10 => "flash",
+        11 => "reactive",
         _ => "mode",
     }
 }

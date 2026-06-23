@@ -934,7 +934,7 @@ fn button(frame: &mut Frame, app: &App, rect: Rect, label: &str, active: bool, a
     } else {
         Style::new().fg(text()).bg(Color::Rgb(0x1c, 0x24, 0x33))
     };
-    frame.render_widget(Paragraph::new(format!(" {label} ")).style(style).alignment(Alignment::Center), rect);
+    frame.render_widget(Paragraph::new(format!("  {label}  ")).style(style).alignment(Alignment::Center), rect);
     app.zone(rect, act);
 }
 
@@ -943,12 +943,12 @@ fn place_buttons(frame: &mut Frame, app: &App, row: Rect, btns: Vec<(String, boo
     let mut x = row.x;
     let end = row.x + row.width;
     for (label, active, act) in btns {
-        let w = label.chars().count() as u16 + 2;
+        let w = label.chars().count() as u16 + 4;
         if x + w > end {
             break;
         }
         button(frame, app, Rect { x, y: row.y, width: w, height: 1 }, &label, active, act);
-        x += w + 1;
+        x += w + 2;
     }
 }
 
@@ -1179,7 +1179,7 @@ fn draw_lighting(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
 }
 
 /// Neon colour palette for the Aura editor (applies to static/breathe/highlight).
-const SWATCHES: [(u8, u8, u8); 8] = [
+const SWATCHES: [(u8, u8, u8); 12] = [
     (0xff, 0x2e, 0x88),
     (0x36, 0xf9, 0xf6),
     (0x00, 0xff, 0x9c),
@@ -1188,6 +1188,10 @@ const SWATCHES: [(u8, u8, u8); 8] = [
     (0x5a, 0xc8, 0xfa),
     (0x9d, 0x4e, 0xdd),
     (0xff, 0xff, 0xff),
+    (0xff, 0x95, 0x00),
+    (0x00, 0x47, 0xff),
+    (0xff, 0x00, 0x00),
+    (0x00, 0xff, 0x00),
 ];
 
 fn draw_swatches(frame: &mut Frame, app: &App, row: Rect) {
@@ -1198,7 +1202,7 @@ fn draw_swatches(frame: &mut Frame, app: &App, row: Rect) {
     let mut x = row.x + 8;
     let end = row.x + row.width;
     for rgb in SWATCHES {
-        let w = 5u16;
+        let w = 3u16;
         if x + w > end {
             break;
         }
