@@ -587,7 +587,7 @@ impl App {
                     .unwrap_or(std::cmp::Ordering::Equal)
             }),
             "pid" => rows.sort_by_key(|p| p.pid),
-            _ => rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+            _ => rows.sort_by_cached_key(|r| r.name.to_lowercase()),
         }
         rows.truncate(PROC_ROWS);
         rows
