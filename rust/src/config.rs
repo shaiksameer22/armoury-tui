@@ -20,6 +20,12 @@ pub struct Config {
     pub fan_stall_temp: f64,
     pub presets: Vec<Preset>,
     pub rules: Vec<Rule>,
+    #[serde(default)]
+    pub session_start_time: Option<f64>,
+    #[serde(default)]
+    pub session_start_percent: Option<f64>,
+    #[serde(default)]
+    pub session_charging: Option<bool>,
 }
 
 /// A named bundle of control settings, applied in one shot.
@@ -74,6 +80,9 @@ impl Default for Config {
                 battery_below: 20,
                 preset: "Travel".into(),
             }],
+            session_start_time: None,
+            session_start_percent: None,
+            session_charging: None,
         }
     }
 }

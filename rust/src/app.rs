@@ -183,6 +183,7 @@ impl App {
             Err(_) => return,
         };
         self.push_history(&snap);
+        self.track_battery_session(&snap);
         self.check_alerts(&snap);
         self.eval_rules(&snap).await;
         self.write_log(&snap);
@@ -680,6 +681,24 @@ impl App {
         }
         push(&mut self.net_down_hist, tot_down);
         push(&mut self.net_up_hist, tot_up);
+    }
+
+    fn track_battery_session(&mut self, s: &Snapshot) {
+        let b = &s.battery;
+        if !b.present {
+            return;
+        }
+        let current_charging = b.ac_online.unwrap_or(false) || b.status.eq_ignore_ascii_case("charging") || b.status.eq_ignore_ascii_case("full");
+        let last_charging = self.cfg.session_charging.unwrap_or(!current_charging); // force transition if None
+
+        if self.cfg.session_start_time.is_none() || current_charging != last_charging {
+            self.cfg.session_charging = Some(current_charging);
+            self.cfg.session_start_time = Some(s.ts);
+            self.cfg.session_start_percent = Some(b.percent.unwrap_or(0.0));
+            if current_charging != last_charging {
+                let _ = self.cfg.save();
+            }
+        }
     }
 
     /// Rising-edge thermal alerts (cool→hot only, so we don't spam).
@@ -1239,7 +1258,7 @@ fn draw_dashboard(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         .split(rows[4]);
     frame.render_widget(render::mem_panel(s), r4[0]);
     frame.render_widget(render::fan_panel(s, &fans), r4[1]);
-    frame.render_widget(render::battery_panel(s), r4[2]);
+    frame.render_widget(render::battery_panel(&app.cfg, s), r4[2]);
     frame.render_widget(render::storage_panel(s), r4[3]);
 }
 
@@ -1262,7 +1281,7 @@ fn draw_power(frame: &mut Frame, app: &App, s: &Snapshot, area: Rect) {
         rows[1],
     );
     frame.render_widget(render::fan_graph_panel(s, &fans), rows[2]);
-    frame.render_widget(render::battery_panel(s), rows[3]);
+    frame.render_widget(render::battery_panel(&app.cfg, s), rows[3]);
 }
 
 /// Clickable profile / charge / fan-curve controls inside a CONTROLS panel.

@@ -412,7 +412,7 @@ pub fn fan_panel(
     panel(Text::from(lines), "FANS", blue())
 }
 
-pub fn battery_panel(s: &Snapshot) -> Paragraph<'static> {
+pub fn battery_panel(cfg: &crate::config::Config, s: &Snapshot) -> Paragraph<'static> {
     let b = &s.battery;
     if !b.present {
         return panel(
@@ -519,6 +519,26 @@ pub fn battery_panel(s: &Snapshot) -> Paragraph<'static> {
                 Style::new().fg(cyan()),
             ),
         ]));
+    }
+    if let Some(start_ts) = cfg.session_start_time {
+        let current_charging = b.ac_online.unwrap_or(false) || charging || b.status.eq_ignore_ascii_case("full");
+        let elapsed = (s.ts - start_ts).max(0.0) as i64;
+        if elapsed >= 60 {
+            let action = if current_charging { "charged" } else { "drained" };
+            let start_pct = cfg.session_start_percent.unwrap_or(0.0);
+            let diff = if current_charging {
+                pct - start_pct
+            } else {
+                start_pct - pct
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:<9}", "session"), Style::new().fg(dim())),
+                Span::styled(
+                    format!("{} {:.0}% in {}h {}m", action, diff.abs(), elapsed / 3600, (elapsed % 3600) / 60),
+                    Style::new().fg(magenta()),
+                ),
+            ]));
+        }
     }
     panel(Text::from(lines), "BATTERY", amber())
 }
