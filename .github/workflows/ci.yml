@@ -23,14 +23,9 @@ jobs:
           components: clippy, rustfmt
 
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          workspaces: rust
 
       - name: Check
         run: cargo check --manifest-path $MANIFEST
@@ -55,14 +50,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('rust/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-release-
+          workspaces: rust
 
       - name: Build release
         run: cargo build --release --manifest-path $MANIFEST

@@ -16,8 +16,8 @@ Steps to verify the change works:
 
 ## Checklist
 
-- [ ] `cargo fmt` — code is formatted
-- [ ] `cargo clippy -- -D warnings` — no warnings
-- [ ] `cargo test` — all tests pass
+- [ ] `cargo fmt --manifest-path rust/Cargo.toml` — code is formatted
+- [ ] `cargo clippy --manifest-path rust/Cargo.toml -- -D warnings` — no warnings
+- [ ] `cargo test --manifest-path rust/Cargo.toml` — all tests pass
 - [ ] Tests added/updated for new behaviour
 - [ ] `CHANGELOG.md` updated (if user-facing)

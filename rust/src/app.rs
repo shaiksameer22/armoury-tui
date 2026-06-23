@@ -178,7 +178,7 @@ impl App {
     /// Collect a snapshot off-thread, then fold it into history + alerts + log.
     async fn collect(&mut self) {
         let tel = Arc::clone(&self.tel);
-        let snap = match tokio::task::spawn_blocking(move || tel.lock().unwrap().snapshot()).await {
+        let snap = match tokio::task::spawn_blocking(move || tel.lock().unwrap_or_else(|e| e.into_inner()).snapshot()).await {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -191,7 +191,7 @@ impl App {
         if self.tab == 3 {
             let tel = Arc::clone(&self.tel);
             if let Ok(c) =
-                tokio::task::spawn_blocking(move || tel.lock().unwrap().connections(60)).await
+                tokio::task::spawn_blocking(move || tel.lock().unwrap_or_else(|e| e.into_inner()).connections(60)).await
             {
                 self.connections = c;
             }
@@ -213,7 +213,7 @@ impl App {
     {
         self.set_toast(busy.into(), amber());
         let ctl = Arc::clone(&self.control);
-        match tokio::task::spawn_blocking(move || f(&ctl.lock().unwrap())).await {
+        match tokio::task::spawn_blocking(move || f(&ctl.lock().unwrap_or_else(|e| e.into_inner()))).await {
             Ok(r) => self.set_toast(r.message, if r.ok { neon() } else { red() }),
             Err(_) => self.set_toast("control task failed".into(), red()),
         }
@@ -227,7 +227,7 @@ impl App {
         let ctl = Arc::clone(&self.control);
         let prof = self.curve_profile.clone();
         let res = tokio::task::spawn_blocking(move || {
-            let c = ctl.lock().unwrap();
+            let c = ctl.lock().unwrap_or_else(|e| e.into_inner());
             (
                 c.get_fan_curves(&prof),
                 c.current_aura_mode(),
@@ -341,7 +341,7 @@ impl App {
         self.set_toast(format!("{prof} curves {verb} ({delta:+}%)"), amber());
         let ctl = Arc::clone(&self.control);
         let res = tokio::task::spawn_blocking(move || {
-            let c = ctl.lock().unwrap();
+            let c = ctl.lock().unwrap_or_else(|e| e.into_inner());
             for cur in &curves {
                 let mut nc = cur.clone();
                 for p in nc.points.iter_mut() {
@@ -606,7 +606,7 @@ impl App {
         self.selected_pid = Some(pid);
         let tel = Arc::clone(&self.tel);
         if let Ok(d) =
-            tokio::task::spawn_blocking(move || tel.lock().unwrap().process_detail(pid)).await
+            tokio::task::spawn_blocking(move || tel.lock().unwrap_or_else(|e| e.into_inner()).process_detail(pid)).await
         {
             self.detail = d;
         }
@@ -766,7 +766,7 @@ impl App {
         self.set_toast(format!("preset → {name}"), neon());
         let ctl = Arc::clone(&self.control);
         let _ = tokio::task::spawn_blocking(move || {
-            let c = ctl.lock().unwrap();
+            let c = ctl.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(pr) = &p.profile {
                 c.set_profile(pr);
             }
@@ -890,7 +890,9 @@ pub async fn run(refresh: f64, log_path: Option<String>) -> Result<()> {
     // Persist last tab + theme for next launch.
     app.cfg.startup_tab = app.tab;
     app.cfg.theme = crate::theme::current_label().to_string();
-    let _ = app.cfg.save();
+    if let Err(e) = app.cfg.save() {
+        eprintln!("Failed to save config: {}", e);
+    }
     result
 }
 

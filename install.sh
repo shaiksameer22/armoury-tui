@@ -73,20 +73,20 @@ $SUDO install -Dm755 "$REPO/rust/target/release/armoury-tui" "$BIN"
 # -- 4. Desktop entry -------------------------------------------------------
 say "Installing desktop entry → $DESKTOP"
 tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
 cat >"$tmp" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Armoury TUI
 GenericName=ASUS laptop control
 Comment=Telemetry and control for ASUS ROG/TUF laptops
-Exec=$BIN
+Exec="$BIN"
 Icon=utilities-terminal
 Terminal=true
 Categories=System;Monitor;HardwareSettings;
 Keywords=asus;rog;tuf;armoury;fan;rgb;battery;
 EOF
 $SUDO install -Dm644 "$tmp" "$DESKTOP"
-rm -f "$tmp"
 
 # -- 5. PATH check ----------------------------------------------------------
 if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qx "$BINDIR"; then
