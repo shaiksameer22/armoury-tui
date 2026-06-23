@@ -168,13 +168,13 @@ fn area_chart(
         let full = filled as usize;
         let rem = filled - full as f64;
         let cell = color.unwrap_or_else(|| grade(frac, hot));
-        for r in 0..height {
+        for (r, row) in grid.iter_mut().enumerate().take(height) {
             let level = height - 1 - r;
             if level < full {
-                grid[r][col] = ('█', cell);
+                row[col] = ('█', cell);
             } else if level == full && rem > 1e-6 {
-                let idx = ((rem * 8.0) as usize).max(1).min(8);
-                grid[r][col] = (BLOCKS[idx], cell);
+                let idx = ((rem * 8.0) as usize).clamp(1, 8);
+                row[col] = (BLOCKS[idx], cell);
             }
         }
     }

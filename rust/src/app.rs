@@ -1493,7 +1493,7 @@ fn draw_proc_controls(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
     let mut btns: Vec<(String, bool, Act)> = PROC_SORTS
         .iter()
-        .map(|s| (s.to_uppercase(), app.proc_sort == *s, Act::ProcSort(*s)))
+        .map(|s| (s.to_uppercase(), app.proc_sort == *s, Act::ProcSort(s)))
         .collect();
     btns.push(("⏻ kill".into(), false, Act::Kill(false)));
     btns.push(("✖ force-kill".into(), false, Act::Kill(true)));
